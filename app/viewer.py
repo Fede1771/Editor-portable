@@ -1,0 +1,698 @@
+"""Visor de PDF: widget de desplazamiento con renderizado bajo demanda y herramientas de interacción."""
+from __future__ import annotations
+
+from collections import OrderedDict
+
+import pymupdf as fitz
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QToolTip
+
+MARGIN = 16
+GAP = 12
+MIN_ZOOM = 0.1
+MAX_ZOOM = 8.0
+CACHE_SIZE = 40
+
+MODE_CONTINUOUS = "continuous"
+MODE_SINGLE = "single"
+MODE_TWO = "two"
+
+FIT_NONE = "none"
+FIT_WIDTH = "width"
+FIT_PAGE = "page"
+
+TOOL_PAN = "pan"
+TOOL_SELECT = "select"
+TOOL_TEXT = "text"
+TOOL_REDACT = "redact"
+TOOL_IMAGE = "image"
+TOOL_LINK = "link"
+TOOL_PEN = "pen"
+TOOL_NOTE = "note"
+TOOL_HIGHLIGHT = "highlight"
+TOOL_UNDERLINE = "underline"
+TOOL_STRIKEOUT = "strikeout"
+
+
+class PdfView(QAbstractScrollArea):
+    """Muestra un documento PyMuPDF con zoom, rotación, herramientas de selección y edición."""
+
+    pageChanged = Signal(int)
+    zoomChanged = Signal(float)
+    modeChanged = Signal(str)
+    toolChanged = Signal(str)
+
+    textRequested = Signal(int, object)      # (page_idx, fitz.Rect)
+    redactRequested = Signal(int, object)    # (page_idx, fitz.Rect)
+    imageRequested = Signal(int, object)     # (page_idx, fitz.Rect)
+    linkRequested = Signal(int, object)      # (page_idx, fitz.Rect)
+    penStrokeFinished = Signal(int, object)  # (page_idx, list[tuple[float, float]])
+    noteRequested = Signal(int, object)      # (page_idx, fitz.Point)
+    highlightRequested = Signal(int, object) # (page_idx, fitz.Rect)
+    underlineRequested = Signal(int, object) # (page_idx, fitz.Rect)
+    strikeoutRequested = Signal(int, object) # (page_idx, fitz.Rect)
+    textSelected = Signal(str)               # Texto seleccionado copiado
+
+    def __init__(self, doc: fitz.Document, parent=None):
+        super().__init__(parent)
+        self.doc = doc
+        self.page_count = doc.page_count
+        self._sizes = [(p.rect.width, p.rect.height) for p in doc]
+
+        self._zoom = 1.0
+        self._fit = FIT_WIDTH
+        self._mode = MODE_CONTINUOUS
+        self._rotation = 0
+        self._current = 0
+        self._tool = TOOL_PAN
+
+        self._rows: list[list[int]] = []
+        self._row_rects: list[QRectF] = []      # rectángulo de cada fila (coords de contenido)
+        self._page_rects: dict[int, QRectF] = {}
+        self._content_h = 0.0
+        self._content_w = 0.0
+
+        self._cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+
+        self._hits: list[tuple[int, fitz.Rect]] = []
+        self._hit_index = -1
+
+        self._panning = False
+        self._pan_last = QPointF()
+
+        self._dragging = False
+        self._drag_start = QPointF()
+        self._drag_current = QPointF()
+        self._selected_text = ""
+        self._hover_block: tuple[int, fitz.Rect] | None = None
+        self._pen_stroke: list[tuple[float, float]] = []
+        self._pen_page: int = -1
+
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self.viewport().setBackgroundRole(self.backgroundRole())
+        self.viewport().setStyleSheet("background-color: #5a5d63;")
+        self._update_cursor()
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
+        self._relayout(keep_position=False)
+
+    # ------------------------------------------------------------------ estado
+    @property
+    def zoom(self) -> float:
+        return self._zoom
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def fit(self) -> str:
+        return self._fit
+
+    @property
+    def rotation(self) -> int:
+        return self._rotation
+
+    @property
+    def current_page(self) -> int:
+        return self._current
+
+    @property
+    def tool(self) -> str:
+        return self._tool
+
+    def set_tool(self, tool: str):
+        if tool != self._tool:
+            self._tool = tool
+            self._dragging = False
+            self._hover_block = None
+            self._update_cursor()
+            self.toolChanged.emit(tool)
+            self.viewport().update()
+
+    def _update_cursor(self):
+        if self._tool == TOOL_PAN:
+            self.viewport().setCursor(QCursor(Qt.OpenHandCursor))
+        elif self._tool in (TOOL_SELECT, TOOL_HIGHLIGHT, TOOL_UNDERLINE, TOOL_STRIKEOUT):
+            self.viewport().setCursor(QCursor(Qt.IBeamCursor))
+        elif self._tool == TOOL_NOTE:
+            self.viewport().setCursor(QCursor(Qt.PointingHandCursor))
+        else:
+            self.viewport().setCursor(QCursor(Qt.CrossCursor))
+
+    # ------------------------------------------------------------- API pública
+    def set_zoom(self, zoom: float, fit: str = FIT_NONE):
+        self._fit = fit
+        self._apply_zoom(zoom)
+
+    def zoom_in(self):
+        self.set_zoom(self._zoom * 1.25)
+
+    def zoom_out(self):
+        self.set_zoom(self._zoom / 1.25)
+
+    def fit_width(self):
+        self._fit = FIT_WIDTH
+        self._relayout()
+
+    def fit_page(self):
+        self._fit = FIT_PAGE
+        self._relayout()
+
+    def set_mode(self, mode: str):
+        if mode == self._mode:
+            return
+        self._mode = mode
+        self._relayout(keep_position=False)
+        self.goto_page(self._current)
+        self.modeChanged.emit(mode)
+
+    def rotate_view(self, delta: int):
+        self._rotation = (self._rotation + delta) % 360
+        self._relayout(keep_position=False)
+        self.goto_page(self._current)
+
+    def goto_page(self, index: int):
+        index = max(0, min(self.page_count - 1, index))
+        if self._mode == MODE_SINGLE:
+            if index != self._current:
+                self._current = index
+                self._relayout(keep_position=False)
+            self.verticalScrollBar().setValue(0)
+        else:
+            rect = self._page_rects.get(index)
+            if rect is not None:
+                self.verticalScrollBar().setValue(int(rect.top() - MARGIN))
+        self._update_current()
+        self.viewport().update()
+
+    def scroll_to_page_rect(self, pno: int, rect: fitz.Rect):
+        """Desplaza la vista hasta el área específica de una anotación o elemento."""
+        self.goto_page(pno)
+        prect = self._page_rects.get(pno)
+        if prect is not None and rect is not None:
+            mrect = self._map_rect(pno, rect)
+            target_y = int(prect.top() + mrect.top() - 50)
+            self.verticalScrollBar().setValue(max(0, target_y))
+
+    def next_page(self):
+        step = 2 if self._mode == MODE_TWO else 1
+        self.goto_page(self._current + step)
+
+    def prev_page(self):
+        step = 2 if self._mode == MODE_TWO else 1
+        self.goto_page(self._current - step)
+
+    def reload(self, doc: fitz.Document | None = None):
+        """Vuelve a leer el documento (tras modificarlo)."""
+        if doc is not None:
+            self.doc = doc
+        self.page_count = self.doc.page_count
+        self._sizes = [(p.rect.width, p.rect.height) for p in self.doc]
+        self._cache.clear()
+        self._current = min(self._current, max(0, self.page_count - 1))
+        self._relayout()
+
+    # ------------------------------------------------------------- búsqueda
+    def search(self, text: str) -> int:
+        self._hits = []
+        self._hit_index = -1
+        text = text.strip()
+        if text:
+            for i in range(self.page_count):
+                for rect in self.doc[i].search_for(text):
+                    self._hits.append((i, rect))
+        if self._hits:
+            self._hit_index = 0
+            self._show_hit()
+        self.viewport().update()
+        return len(self._hits)
+
+    def clear_search(self):
+        self._hits = []
+        self._hit_index = -1
+        self.viewport().update()
+
+    def next_hit(self) -> tuple[int, int]:
+        if self._hits:
+            self._hit_index = (self._hit_index + 1) % len(self._hits)
+            self._show_hit()
+        return self._hit_index + 1, len(self._hits)
+
+    def prev_hit(self) -> tuple[int, int]:
+        if self._hits:
+            self._hit_index = (self._hit_index - 1) % len(self._hits)
+            self._show_hit()
+        return self._hit_index + 1, len(self._hits)
+
+    def _show_hit(self):
+        page, rect = self._hits[self._hit_index]
+        if self._mode == MODE_SINGLE and page != self._current:
+            self._current = page
+            self._relayout(keep_position=False)
+        prect = self._page_rects.get(page)
+        if prect is not None:
+            hr = self._map_rect(page, rect).translated(prect.topLeft())
+            vbar = self.verticalScrollBar()
+            hbar = self.horizontalScrollBar()
+            vh = self.viewport().height()
+            vw = self.viewport().width()
+            if not (vbar.value() + 20 < hr.top() and hr.bottom() < vbar.value() + vh - 20):
+                vbar.setValue(int(hr.center().y() - vh / 2))
+            if not (hbar.value() < hr.left() and hr.right() < hbar.value() + vw):
+                hbar.setValue(int(hr.center().x() - vw / 2))
+        self._update_current()
+        self.viewport().update()
+
+    # -------------------------------------------------------------- geometría
+    def _eff_size(self, i: int) -> tuple[float, float]:
+        w, h = self._sizes[i]
+        if self._rotation in (90, 270):
+            w, h = h, w
+        return w, h
+
+    def _apply_zoom(self, zoom: float):
+        zoom = max(MIN_ZOOM, min(MAX_ZOOM, zoom))
+        if abs(zoom - self._zoom) < 1e-6:
+            return
+        self._zoom = zoom
+        self._relayout()
+
+    def _build_rows(self) -> list[list[int]]:
+        n = self.page_count
+        if n == 0:
+            return []
+        if self._mode == MODE_SINGLE:
+            return [[self._current]]
+        if self._mode == MODE_TWO:
+            return [[i, i + 1] if i + 1 < n else [i] for i in range(0, n, 2)]
+        return [[i] for i in range(n)]
+
+    def _compute_fit_zoom(self) -> float:
+        vw = max(50, self.viewport().width())
+        vh = max(50, self.viewport().height())
+        rows = self._build_rows()
+        if not rows:
+            return self._zoom
+        max_row_w = max(sum(self._eff_size(i)[0] for i in row) for row in rows)
+        max_row_gap = max((len(row) - 1) * GAP for row in rows)
+        zw = (vw - 2 * MARGIN - max_row_gap) / max_row_w
+        if self._fit == FIT_WIDTH:
+            z = zw
+        else:
+            max_row_h = max(max(self._eff_size(i)[1] for i in row) for row in rows)
+            zh = (vh - 2 * MARGIN) / max_row_h
+            z = min(zw, zh)
+        return max(MIN_ZOOM, min(MAX_ZOOM, z))
+
+    def _relayout(self, keep_position: bool = True):
+        vbar = self.verticalScrollBar()
+        ratio = vbar.value() / self._content_h if (keep_position and self._content_h > 0) else 0.0
+        old_zoom = self._zoom
+
+        if self._fit != FIT_NONE:
+            self._zoom = self._compute_fit_zoom()
+
+        self._rows = self._build_rows()
+        self._row_rects = []
+        self._page_rects = {}
+
+        vw = self.viewport().width()
+        row_sizes = []
+        for row in self._rows:
+            w = sum(self._eff_size(i)[0] for i in row) * self._zoom + (len(row) - 1) * GAP
+            h = max(self._eff_size(i)[1] for i in row) * self._zoom
+            row_sizes.append((w, h))
+
+        self._content_w = (max((w for w, _ in row_sizes), default=0) + 2 * MARGIN)
+        total_w = max(self._content_w, vw)
+
+        y = float(MARGIN)
+        for row, (rw, rh) in zip(self._rows, row_sizes):
+            x = (total_w - rw) / 2
+            self._row_rects.append(QRectF(x, y, rw, rh))
+            for i in row:
+                w, h = self._eff_size(i)
+                w *= self._zoom
+                h *= self._zoom
+                self._page_rects[i] = QRectF(x, y + (rh - h) / 2, w, h)
+                x += w + GAP
+            y += rh + GAP
+        self._content_h = y - GAP + MARGIN if self._rows else 0.0
+
+        hbar = self.horizontalScrollBar()
+        vp = self.viewport().size()
+        hbar.setRange(0, max(0, int(self._content_w - vp.width())))
+        hbar.setPageStep(vp.width())
+        vbar.setRange(0, max(0, int(self._content_h - vp.height())))
+        vbar.setPageStep(vp.height())
+        vbar.setSingleStep(40)
+        hbar.setSingleStep(40)
+
+        if keep_position and self._mode != MODE_SINGLE:
+            vbar.setValue(int(ratio * self._content_h))
+
+        self._update_current()
+        self.viewport().update()
+        if abs(old_zoom - self._zoom) > 1e-6:
+            self.zoomChanged.emit(self._zoom)
+
+    # --------------------------------------------------------- página actual
+    def _update_current(self):
+        if not self._rows:
+            return
+        if self._mode == MODE_SINGLE:
+            new = self._current
+        else:
+            probe = self.verticalScrollBar().value() + self.viewport().height() / 3
+            new = self._rows[-1][0]
+            for row, rect in zip(self._rows, self._row_rects):
+                if probe <= rect.bottom() + GAP / 2:
+                    new = row[0]
+                    break
+        if new != self._current:
+            self._current = new
+        self.pageChanged.emit(self._current)
+
+    def _on_scroll(self):
+        self._update_current()
+        self.viewport().update()
+
+    # ------------------------------------------------------------ renderizado
+    def _pixmap(self, i: int) -> QPixmap:
+        dpr = self.devicePixelRatioF()
+        key = (i, round(self._zoom, 4), self._rotation, dpr)
+        pix = self._cache.get(key)
+        if pix is not None:
+            self._cache.move_to_end(key)
+            return pix
+        scale = self._zoom * dpr
+        matrix = fitz.Matrix(scale, scale).prerotate(self._rotation)
+        pm = self.doc[i].get_pixmap(matrix=matrix, alpha=False)
+        img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888).copy()
+        pix = QPixmap.fromImage(img)
+        pix.setDevicePixelRatio(dpr)
+        self._cache[key] = pix
+        while len(self._cache) > CACHE_SIZE:
+            self._cache.popitem(last=False)
+        return pix
+
+    def _map_rect(self, i: int, rect: fitz.Rect) -> QRectF:
+        """Convierte un rectángulo en coords de página al espacio de la página mostrada."""
+        m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
+        page_box = self.doc[i].rect * m
+        r = rect * m
+        return QRectF(r.x0 - page_box.x0, r.y0 - page_box.y0, r.width, r.height)
+
+    def _map_point(self, i: int, pt: fitz.Point) -> QPointF:
+        """Convierte un punto en coords de página al espacio de la página mostrada."""
+        m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
+        page_box = self.doc[i].rect * m
+        p = pt * m
+        return QPointF(p.x - page_box.x0, p.y - page_box.y0)
+
+    def viewport_to_page_point(self, pt: QPointF) -> tuple[int | None, fitz.Point | None]:
+        """Convierte un punto del viewport a coords absolutas de la página PDF."""
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        cpt = pt + QPointF(dx, dy)
+        for pno, prect in self._page_rects.items():
+            if prect.contains(cpt):
+                rel_x = cpt.x() - prect.x()
+                rel_y = cpt.y() - prect.y()
+                m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
+                page_box = self.doc[pno].rect * m
+                inv_m = ~m
+                pdf_pt = fitz.Point(rel_x + page_box.x0, rel_y + page_box.y0) * inv_m
+                return pno, pdf_pt
+        return None, None
+
+    def viewport_to_page_rect(self, p1: QPointF, p2: QPointF) -> tuple[int | None, fitz.Rect | None]:
+        """Convierte una región de arrastre del viewport a un fitz.Rect en la página PDF."""
+        pno1, pt1 = self.viewport_to_page_point(p1)
+        pno2, pt2 = self.viewport_to_page_point(p2)
+        pno = pno1 if pno1 is not None else pno2
+        if pno is None:
+            return None, None
+        pt1 = pt1 or pt2
+        pt2 = pt2 or pt1
+        rect = fitz.Rect(min(pt1.x, pt2.x), min(pt1.y, pt2.y), max(pt1.x, pt2.x), max(pt1.y, pt2.y))
+        return pno, rect
+
+    def paintEvent(self, event):
+        painter = QPainter(self.viewport())
+        dx = -self.horizontalScrollBar().value()
+        dy = -self.verticalScrollBar().value()
+        view_rect = QRectF(self.viewport().rect())
+
+        if self.page_count == 0:
+            return
+
+        hits_by_page: dict[int, list[tuple[int, fitz.Rect]]] = {}
+        for idx, (p, r) in enumerate(self._hits):
+            hits_by_page.setdefault(p, []).append((idx, r))
+
+        for i, rect in self._page_rects.items():
+            target = rect.translated(dx, dy)
+            if not target.intersects(view_rect):
+                continue
+            painter.fillRect(target.translated(3, 3), QColor(0, 0, 0, 60))
+            painter.drawPixmap(target.topLeft(), self._pixmap(i))
+            painter.setPen(QPen(QColor(30, 30, 30), 1))
+            painter.drawRect(target)
+            for idx, r in hits_by_page.get(i, []):
+                hr = self._map_rect(i, r).translated(target.topLeft())
+                color = QColor(255, 140, 0, 130) if idx == self._hit_index else QColor(255, 235, 0, 110)
+                painter.fillRect(hr, color)
+
+        # Resaltado al pasar el cursor sobre un bloque de texto existente
+        if self._hover_block is not None and not self._dragging and self._tool == TOOL_TEXT:
+            hpno, hrect = self._hover_block
+            if hpno in self._page_rects:
+                target_page = self._page_rects[hpno].translated(dx, dy)
+                hr = self._map_rect(hpno, hrect).translated(target_page.topLeft())
+                painter.fillRect(hr, QColor(0, 120, 215, 30))
+                painter.setPen(QPen(QColor(0, 120, 215, 200), 1, Qt.DashLine))
+                painter.drawRect(hr)
+
+        # Dibujar arrastre activo de herramientas
+        if self._dragging:
+            x0 = min(self._drag_start.x(), self._drag_current.x())
+            y0 = min(self._drag_start.y(), self._drag_current.y())
+            w = abs(self._drag_start.x() - self._drag_current.x())
+            h = abs(self._drag_start.y() - self._drag_current.y())
+            drag_rect = QRectF(x0, y0, w, h)
+
+            if self._tool == TOOL_SELECT:
+                painter.fillRect(drag_rect, QColor(0, 120, 215, 70))
+                painter.setPen(QPen(QColor(0, 120, 215), 1, Qt.DashLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_REDACT:
+                painter.fillRect(drag_rect, QColor(220, 20, 60, 90))
+                painter.setPen(QPen(QColor(220, 20, 60), 2, Qt.SolidLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_TEXT:
+                painter.fillRect(drag_rect, QColor(30, 144, 255, 50))
+                painter.setPen(QPen(QColor(30, 144, 255), 1, Qt.DashLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_IMAGE:
+                painter.fillRect(drag_rect, QColor(46, 139, 87, 50))
+                painter.setPen(QPen(QColor(46, 139, 87), 1, Qt.DashLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_LINK:
+                painter.fillRect(drag_rect, QColor(147, 112, 219, 50))
+                painter.setPen(QPen(QColor(147, 112, 219), 1, Qt.DashLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_HIGHLIGHT:
+                painter.fillRect(drag_rect, QColor(255, 235, 59, 110))
+                painter.setPen(QPen(QColor(251, 192, 45), 1, Qt.DashLine))
+                painter.drawRect(drag_rect)
+            elif self._tool == TOOL_UNDERLINE:
+                painter.fillRect(drag_rect, QColor(33, 150, 243, 60))
+                painter.setPen(QPen(QColor(33, 150, 243), 2, Qt.SolidLine))
+                painter.drawLine(drag_rect.bottomLeft(), drag_rect.bottomRight())
+            elif self._tool == TOOL_STRIKEOUT:
+                painter.fillRect(drag_rect, QColor(244, 67, 54, 60))
+                painter.setPen(QPen(QColor(244, 67, 54), 2, Qt.SolidLine))
+                mid_y = drag_rect.center().y()
+                painter.drawLine(QPointF(drag_rect.left(), mid_y), QPointF(drag_rect.right(), mid_y))
+
+        # Dibujar trazo en vivo para herramienta de tinta/lápiz (TOOL_PEN)
+        if self._tool == TOOL_PEN and len(self._pen_stroke) > 1 and self._pen_page in self._page_rects:
+            target_page = self._page_rects[self._pen_page].translated(dx, dy)
+            pen_pen = QPen(QColor(0, 40, 160), 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen_pen)
+            for i in range(len(self._pen_stroke) - 1):
+                p1 = self._map_point(self._pen_page, fitz.Point(self._pen_stroke[i])) + target_page.topLeft()
+                p2 = self._map_point(self._pen_page, fitz.Point(self._pen_stroke[i + 1])) + target_page.topLeft()
+                painter.drawLine(p1, p2)
+
+        painter.end()
+
+    # ---------------------------------------------------------------- eventos
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self.set_zoom(self._zoom * (1.15 if delta > 0 else 1 / 1.15))
+            event.accept()
+            return
+        if self._mode == MODE_SINGLE:
+            vbar = self.verticalScrollBar()
+            delta = event.angleDelta().y()
+            if delta < 0 and vbar.value() >= vbar.maximum() and self._current < self.page_count - 1:
+                self.goto_page(self._current + 1)
+                event.accept()
+                return
+            if delta > 0 and vbar.value() <= vbar.minimum() and self._current > 0:
+                self.goto_page(self._current - 1)
+                self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+                event.accept()
+                return
+        super().wheelEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self._tool == TOOL_PAN:
+                self._panning = True
+                self._pan_last = event.position()
+                self.viewport().setCursor(QCursor(Qt.ClosedHandCursor))
+            elif self._tool == TOOL_PEN:
+                self._dragging = True
+                pno, pt = self.viewport_to_page_point(event.position())
+                if pno is not None and pt is not None:
+                    self._pen_page = pno
+                    self._pen_stroke = [(pt.x, pt.y)]
+                else:
+                    self._pen_page = -1
+                    self._pen_stroke = []
+            else:
+                self._dragging = True
+                self._drag_start = event.position()
+                self._drag_current = event.position()
+                self.viewport().update()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning:
+            delta = event.position() - self._pan_last
+            self._pan_last = event.position()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(delta.y()))
+        elif self._dragging:
+            if self._tool == TOOL_PEN:
+                pno, pt = self.viewport_to_page_point(event.position())
+                if pno == self._pen_page and pt is not None:
+                    self._pen_stroke.append((pt.x, pt.y))
+            else:
+                self._drag_current = event.position()
+            self.viewport().update()
+        else:
+            # Inspección de comentarios o anotaciones embebidas al pasar el cursor
+            pno, pt = self.viewport_to_page_point(event.position())
+            tip_shown = False
+            if pno is not None and pt is not None:
+                for annot in self.doc[pno].annots():
+                    if annot.rect.contains(pt):
+                        info = annot.info or {}
+                        t_type = annot.type[1] if isinstance(annot.type, tuple) else str(annot.type)
+                        author = info.get("title", "").strip()
+                        content = info.get("content", "").strip()
+                        if not content and t_type in ("Highlight", "Underline", "StrikeOut"):
+                            try:
+                                content = self.doc[pno].get_text("text", clip=annot.rect).strip()
+                            except Exception:
+                                pass
+                        tip_lines = [f"[{t_type}]"]
+                        if author:
+                            tip_lines.append(f"Autor: {author}")
+                        if content:
+                            tip_lines.append(content)
+                        QToolTip.showText(event.globalPosition().toPoint(), "\n".join(tip_lines), self.viewport())
+                        tip_shown = True
+                        break
+            if not tip_shown and self._tool != TOOL_TEXT:
+                QToolTip.hideText()
+
+            if self._tool == TOOL_TEXT:
+                from . import content_ops as cops
+                pno, pt = self.viewport_to_page_point(event.position())
+                new_hover = None
+                if pno is not None and pt is not None:
+                    b = cops.find_text_block_at(self.doc[pno], pt)
+                    if b is not None:
+                        new_hover = (pno, b["bbox"])
+                if new_hover != self._hover_block:
+                    self._hover_block = new_hover
+                    if new_hover:
+                        self.viewport().setCursor(QCursor(Qt.IBeamCursor))
+                    else:
+                        self.viewport().setCursor(QCursor(Qt.CrossCursor))
+                    self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self._panning:
+                self._panning = False
+                self.viewport().setCursor(QCursor(Qt.OpenHandCursor))
+            elif self._dragging:
+                self._dragging = False
+                if self._tool == TOOL_PEN:
+                    if len(self._pen_stroke) > 1 and self._pen_page >= 0:
+                        self.penStrokeFinished.emit(self._pen_page, list(self._pen_stroke))
+                    self._pen_stroke = []
+                    self._pen_page = -1
+                    self.viewport().update()
+                else:
+                    pno, rect = self.viewport_to_page_rect(self._drag_start, self._drag_current)
+                    self.viewport().update()
+
+                    if pno is not None and rect is not None:
+                        if self._tool == TOOL_SELECT:
+                            text = self.doc[pno].get_textbox(rect).strip()
+                            if text:
+                                self._selected_text = text
+                                QApplication.clipboard().setText(text)
+                                self.textSelected.emit(text)
+                        elif self._tool == TOOL_TEXT:
+                            self.textRequested.emit(pno, rect)
+                        elif self._tool == TOOL_REDACT:
+                            self.redactRequested.emit(pno, rect)
+                        elif self._tool == TOOL_IMAGE:
+                            self.imageRequested.emit(pno, rect)
+                        elif self._tool == TOOL_LINK:
+                            self.linkRequested.emit(pno, rect)
+                        elif self._tool == TOOL_HIGHLIGHT:
+                            self.highlightRequested.emit(pno, rect)
+                        elif self._tool == TOOL_UNDERLINE:
+                            self.underlineRequested.emit(pno, rect)
+                        elif self._tool == TOOL_STRIKEOUT:
+                            self.strikeoutRequested.emit(pno, rect)
+                        elif self._tool == TOOL_NOTE:
+                            self.noteRequested.emit(pno, fitz.Point(rect.x0, rect.y0))
+
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key_Right and self._mode != MODE_CONTINUOUS:
+            self.next_page()
+        elif key == Qt.Key_Left and self._mode != MODE_CONTINUOUS:
+            self.prev_page()
+        elif key == Qt.Key_Home:
+            self.goto_page(0)
+        elif key == Qt.Key_End:
+            self.goto_page(self.page_count - 1)
+        elif event.matches(QKeySequence.Copy):
+            if self._selected_text:
+                QApplication.clipboard().setText(self._selected_text)
+        else:
+            super().keyPressEvent(event)

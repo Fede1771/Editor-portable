@@ -1,0 +1,20 @@
+# Entornos virtuales
+.venv/
+venv/
+ENV/
+
+# Bytecode de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller temporales y distribución
+build/
+dist/
+*.spec.bak
+
+# Archivos temporales del sistema
+*.tmp
+*.temp
+Thumbs.db
+Desktop.ini
