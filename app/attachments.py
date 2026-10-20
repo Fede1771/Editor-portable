@@ -112,19 +112,20 @@ class AttachmentWidget(QWidget):
         self.icon_provider = QFileIconProvider()
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Nombre", "Tamaño", "Fecha"])
+        self.tree.setHeaderLabels(["Nombre", "Tamaño"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
 
-        # Barra de botones de acción
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(2, 2, 2, 2)
-        btn_layout.setSpacing(4)
+        # Barra de botones compacta en 2 filas para no forzar el ancho del panel lateral
+        btn_layout = QVBoxLayout()
+        btn_layout.setContentsMargins(4, 4, 4, 4)
+        btn_layout.setSpacing(3)
 
+        row1 = QHBoxLayout()
+        row1.setSpacing(3)
         self.btn_open = QPushButton("Abrir")
         self.btn_open.setToolTip("Abrir el archivo adjunto seleccionado")
         self.btn_open.clicked.connect(self.open_selected)
@@ -137,7 +138,13 @@ class AttachmentWidget(QWidget):
         self.btn_extract_all.setToolTip("Guardar todos los adjuntos en una carpeta")
         self.btn_extract_all.clicked.connect(self.extract_all)
 
-        self.btn_add = QPushButton("Adjuntar…")
+        row1.addWidget(self.btn_open)
+        row1.addWidget(self.btn_save)
+        row1.addWidget(self.btn_extract_all)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(3)
+        self.btn_add = QPushButton("+ Adjuntar…")
         self.btn_add.setToolTip("Incrustar un nuevo archivo dentro del PDF")
         self.btn_add.clicked.connect(self.add_attachment)
 
@@ -145,11 +152,11 @@ class AttachmentWidget(QWidget):
         self.btn_del.setToolTip("Eliminar el archivo adjunto del PDF")
         self.btn_del.clicked.connect(self.delete_selected)
 
-        btn_layout.addWidget(self.btn_open)
-        btn_layout.addWidget(self.btn_save)
-        btn_layout.addWidget(self.btn_extract_all)
-        btn_layout.addWidget(self.btn_add)
-        btn_layout.addWidget(self.btn_del)
+        row2.addWidget(self.btn_add)
+        row2.addWidget(self.btn_del)
+
+        btn_layout.addLayout(row1)
+        btn_layout.addLayout(row2)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -169,7 +176,7 @@ class AttachmentWidget(QWidget):
             fn = att["filename"]
             sz = format_size(att["size"])
             dt = att["date"]
-            item = QTreeWidgetItem([fn, sz, dt])
+            item = QTreeWidgetItem([fn, sz])
             item.setData(0, Qt.UserRole, att)
 
             # Icono nativo de Windows para la extensión del archivo

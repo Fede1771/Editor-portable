@@ -30,13 +30,14 @@ class ThumbnailList(QListWidget):
     def __init__(self, doc: fitz.Document, parent=None):
         super().__init__(parent)
         self.doc = doc
-        self.setViewMode(QListWidget.ListMode)
+        self.setViewMode(QListWidget.IconMode)
+        self.setResizeMode(QListWidget.Adjust)
         self.setMovement(QListWidget.Snap)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setIconSize(QSize(THUMB_W, int(THUMB_W * 1.42)))
-        self.setSpacing(4)
+        self.setSpacing(6)
         self._next = 0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._fill_batch)
@@ -50,8 +51,8 @@ class ThumbnailList(QListWidget):
         for i in range(self.doc.page_count):
             item = QListWidgetItem(str(i + 1))
             item.setData(self.ORIG_ROLE, i)
-            item.setTextAlignment(Qt.AlignHCenter)
-            item.setSizeHint(QSize(THUMB_W + 24, int(THUMB_W * 1.42) + 28))
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setSizeHint(QSize(THUMB_W + 16, int(THUMB_W * 1.42) + 24))
             self.addItem(item)
         for r in select or []:
             if 0 <= r < self.count():
@@ -207,7 +208,7 @@ class DocTab(QWidget):
         self.splitter.addWidget(self.side)
         self.splitter.addWidget(self.view)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([220, 900])
+        self.splitter.setSizes([190, 950])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

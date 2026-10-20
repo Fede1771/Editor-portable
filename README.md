@@ -1,6 +1,6 @@
 # Editor PDF Portable
 
-Una suite completa, ligera y autónoma para la visualización, edición in situ, organización, creación, reconocimiento de texto (OCR), conversión, firma digital y optimización de documentos PDF en Windows.
+Una suite completa, ligera y autónoma para la visualización, edición in situ, organización, creación, reconocimiento de texto (OCR), conversión y optimización de documentos PDF en Windows.
 
 Diseñado para ser **100% portable**: puede ejecutarse en cualquier PC con Windows sin necesidad de instalar Python, librerías adicionales ni software de terceros.
 
@@ -38,7 +38,7 @@ Para desarrolladores o usuarios que deseen modificar el código fuente con el en
 - **Panel lateral:**
   - **Miniaturas:** navegación visual rápida, selección múltiple y reordenamiento.
   - **Marcadores / Índice:** navegación jerárquica por secciones y títulos del PDF.
-  - **Comentarios embebidos:** árbol con todas las notas, firmas y resaltados existentes en el PDF.
+  - **Comentarios embebidos:** Árbol con todas las notas y resaltados existentes en el PDF.
   - **Archivos adjuntos embebidos:** pestaña «Adjuntos» que detecta y lista todos los archivos incrustados en el PDF (cédulas de notificación, formularios Excel, manuales PDF anexos, hojas de cálculo, etc.) con sus iconos oficiales de Windows, peso y fecha. Permite abrirlos con doble clic, extraerlos o adjuntar nuevos archivos.
 - **Búsqueda interactiva:** Cuadro de búsqueda (`Ctrl+F`) con resaltado amarillo de coincidencias y navegación con `F3` / `Shift+F3`.
 - **Múltiples pestañas:** Apertura simultánea de varios documentos con navegación por pestañas independientes.
@@ -83,7 +83,7 @@ Para desarrolladores o usuarios que deseen modificar el código fuente con el en
 - **Censura permanente (*Redact*):** 
   - Herramienta manual de área (`R`) para tapar información confidencial con relleno negro. A diferencia de un simple dibujo, destruye físicamente el texto e imágenes vectoriales subyacentes.
   - Búsqueda y censura automática: busca palabras o patrones en todo el PDF y las censura en un solo paso.
-- **Insertar imágenes:** Inserta logotipos, fotos o firmas (`I`) con previsualización y posicionamiento interactivo.
+- **Insertar imágenes:** Inserta logotipos o imágenes (`I`) con previsualización y posicionamiento interactivo.
 - **Hipervínculos:** Inserta enlaces web cliqueables (`L`) sobre cualquier región rectangular.
 - **Extracción de imágenes:** Exporta todas las imágenes incrustadas dentro del PDF a una carpeta local.
 - **Deshacer / Rehacer:** Pila de historial completa (`Ctrl+Z` / `Ctrl+Y`) en todas las operaciones.
@@ -98,9 +98,8 @@ Si abres un PDF que es un escaneo o una imagen y al principio no puedes seleccio
 3. **Procesar:** Haz clic en Aceptar. El sistema creará una capa vectorial transparente de texto legible en segundo plano.
 4. **Editar:** Presiona la tecla `T` (o el icono de texto en la barra) y haz un clic directo sobre la palabra o recuadro que deseas cambiar. Se abrirá el editor con el texto detectado, listo para modificar y con auto-ajuste para no desbordar el recuadro.
 
-### 5. Firma Manuscrita y Anotaciones de Estudio
-- **Firma digital con ratón o táctil (`🖋 Firmar…`):** Abre un lienzo blanco interactivo donde puedes firmar a mano alzada utilizando el ratón (hacer clic y arrastrar) o lápiz óptico. Permite elegir color de tinta (Azul estilográfica, Negro tinta o Rojo) y grosor del trazo. Se inserta en el documento con fondo transparente.
-- **Lápiz / Trazo libre (`P`):** Dibuja trazos, anotaciones manuscritas, flechas o firmas directamente sobre la hoja con renderizado vectorial en tiempo real.
+### 5. Anotaciones de Estudio y Dibujo Libre
+- **Lápiz / Trazo libre (`P`):** Dibuja trazos, anotaciones manuscritas, flechas o esquemas directamente sobre la hoja con renderizado vectorial en tiempo real.
 - **Anotaciones de estudio:**
   - **Resaltador fluorescente (`Shift+H`):** Marca párrafos e ideas clave en amarillo brillante.
   - **Subrayado (`Shift+U`):** Subraya frases o líneas en azul.
@@ -145,7 +144,7 @@ Editor portable/
 │   ├── content_ops.py          # Edición in situ, censura, texto, imágenes y enlaces
 │   ├── conversion.py           # Conversores a Word (.docx), Excel (.xlsx), HTML, TXT, imágenes
 │   ├── creation.py             # Motor de creación de PDFs (Office, imágenes, escáner, web)
-│   ├── dialogs.py              # Formularios, canvas de firma y ventanas modales
+│   ├── dialogs.py              # Formularios y ventanas modales
 │   ├── doc_tab.py              # Controlador de pestaña, árbol de comentarios y pila Undo/Redo
 │   ├── forms.py                # Gestión, inspección y aplanado de AcroForms
 │   ├── main_window.py          # Ventana principal, menús, barras de herramientas y atajos

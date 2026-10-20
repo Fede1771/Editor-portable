@@ -27,7 +27,7 @@ from .background import run_blocking
 from .dialogs import (
     AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, ConvertImagesDialog,
     CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog, OcrDialog,
-    OptimizeDialog, SignatureDialog, SplitDialog, TextEditDialog, WatermarkDialog,
+    OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
 )
 from .doc_tab import DocTab
 from .viewer import (
@@ -139,7 +139,6 @@ class MainWindow(QMainWindow):
         self.a_tool_image = self._act("🖼 Imagen", lambda: self._set_active_tool(TOOL_IMAGE), "I", "Insertar imagen en la página", checkable=True)
         self.a_tool_link = self._act("🔗 Enlace", lambda: self._set_active_tool(TOOL_LINK), "L", "Insertar enlace web o salto de página", checkable=True)
         self.a_tool_pen = self._act("✏ Lápiz", lambda: self._set_active_tool(TOOL_PEN), "P", "Dibujar a mano alzada", checkable=True)
-        self.a_sign = self._act("🖋 Firmar…", self.sign_document, None, "Dibujar firma manuscrita e insertarla")
         self.a_tool_highlight = self._act("🖍 Resaltar", lambda: self._set_active_tool(TOOL_HIGHLIGHT), "Shift+H", "Resaltar texto o área", checkable=True)
         self.a_tool_underline = self._act("⎁ Subrayar", lambda: self._set_active_tool(TOOL_UNDERLINE), "Shift+U", "Subrayar texto", checkable=True)
         self.a_tool_strikeout = self._act("̶S̶ Tachar", lambda: self._set_active_tool(TOOL_STRIKEOUT), "Shift+K", "Tachar texto", checkable=True)
@@ -181,7 +180,7 @@ class MainWindow(QMainWindow):
 
         self.tool_actions = [
             self.a_tool_pan, self.a_tool_select, self.a_tool_text, self.a_tool_redact,
-            self.a_tool_image, self.a_tool_link, self.a_tool_pen, self.a_sign,
+            self.a_tool_image, self.a_tool_link, self.a_tool_pen,
             self.a_tool_highlight, self.a_tool_underline, self.a_tool_strikeout, self.a_tool_note,
             self.a_find_redact, self.a_extract_imgs,
         ]
@@ -239,7 +238,6 @@ class MainWindow(QMainWindow):
         tb.addAction(self.a_tool_image)
         tb.addAction(self.a_tool_link)
         tb.addAction(self.a_tool_pen)
-        tb.addAction(self.a_sign)
         tb.addAction(self.a_tool_highlight)
         tb.addAction(self.a_tool_underline)
         tb.addAction(self.a_tool_strikeout)
@@ -309,7 +307,6 @@ class MainWindow(QMainWindow):
 
         m = mb.addMenu("&Anotaciones")
         m.addAction(self.a_tool_pen)
-        m.addAction(self.a_sign)
         m.addSeparator()
         m.addAction(self.a_tool_highlight)
         m.addAction(self.a_tool_underline)
@@ -744,35 +741,6 @@ class MainWindow(QMainWindow):
             f"Tachado añadido en página {pno + 1}",
             goto=pno,
         )
-
-    def sign_document(self):
-        tab = self.current_tab()
-        if not tab:
-            return
-        dlg = SignatureDialog(parent=self)
-        if dlg.exec() != QDialog.Accepted:
-            return
-        sig_img = dlg.get_signature_image()
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            sig_tmp = f.name
-        sig_img.save(sig_tmp, "PNG")
-        try:
-            pno = tab.view.current_page
-            page_rect = tab.doc[pno].rect
-            target_w = 160.0
-            target_h = 70.0
-            target_x = max(20.0, page_rect.width - target_w - 50.0)
-            target_y = max(20.0, page_rect.height - target_h - 70.0)
-            rect = fitz.Rect(target_x, target_y, target_x + target_w, target_y + target_h)
-            self._edit(
-                tab,
-                lambda d: cops.insert_image(d, pno, rect, sig_tmp),
-                f"Firma insertada en página {pno + 1}",
-                goto=pno,
-            )
-        finally:
-            if os.path.exists(sig_tmp):
-                os.remove(sig_tmp)
 
     def fill_form_fields(self):
         tab = self.current_tab()
