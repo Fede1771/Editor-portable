@@ -4,18 +4,70 @@ from __future__ import annotations
 import os
 
 import pymupdf as fitz
-from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtCore import QItemSelectionModel, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QListWidget, QListWidgetItem, QSplitter, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QListWidget, QListWidgetItem, QSplitter, QStyle,
+    QStyledItemDelegate, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .viewer import PdfView
 from .attachments import AttachmentWidget
+from .search_bar import FloatingSearchBar
 
 THUMB_W = 120
 UNDO_LIMIT = 15
+
+
+class ThumbnailDelegate(QStyledItemDelegate):
+    """Renderizado centrado de cada miniatura sin huecos laterales, adaptativo al ancho del panel."""
+
+    def sizeHint(self, option, index):
+        thumb_h = int(THUMB_W * 1.42)
+        return QSize(option.rect.width() if option.rect.width() > 0 else (THUMB_W + 24), thumb_h + 30)
+
+    def paint(self, painter: QPainter, option, index):
+        rect = option.rect
+        thumb_h = int(THUMB_W * 1.42)
+        thumb_w = THUMB_W
+        x = rect.x() + max(0, (rect.width() - thumb_w) // 2)
+        y = rect.y() + 4
+
+        # Resaltado de selección centrado alrededor de la miniatura
+        if option.state & QStyle.State_Selected:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing)
+            card_rect = QRect(x - 6, y - 2, thumb_w + 12, thumb_h + 24)
+            painter.setBrush(QColor(0, 120, 215, 30))
+            painter.setPen(QPen(QColor(0, 120, 215), 1.5))
+            painter.drawRoundedRect(card_rect, 6, 6)
+            painter.restore()
+
+        # Dibujo de la miniatura
+        icon = index.data(Qt.DecorationRole)
+        if icon and not icon.isNull():
+            pix = icon.pixmap(QSize(thumb_w, thumb_h))
+            if not pix.isNull():
+                tw = pix.width()
+                th = pix.height()
+                tx = rect.x() + max(0, (rect.width() - tw) // 2)
+                ty = y + (thumb_h - th) // 2
+                painter.fillRect(QRect(tx + 2, ty + 2, tw, th), QColor(0, 0, 0, 30))
+                painter.drawPixmap(tx, ty, pix)
+                painter.setPen(QColor(180, 180, 180))
+                painter.drawRect(tx, ty, tw, th)
+
+        # Número de página centrado abajo
+        p_str = index.data(Qt.DisplayRole)
+        if p_str:
+            painter.save()
+            font = painter.font()
+            font.setPointSize(9)
+            painter.setFont(font)
+            is_sel = bool(option.state & QStyle.State_Selected)
+            painter.setPen(QColor(0, 100, 200) if is_sel else QColor(50, 50, 50))
+            painter.drawText(QRect(rect.x(), y + thumb_h + 2, rect.width(), 18), Qt.AlignCenter, str(p_str))
+            painter.restore()
 
 
 class ThumbnailList(QListWidget):
@@ -30,29 +82,33 @@ class ThumbnailList(QListWidget):
     def __init__(self, doc: fitz.Document, parent=None):
         super().__init__(parent)
         self.doc = doc
-        self.setViewMode(QListWidget.IconMode)
-        self.setResizeMode(QListWidget.Adjust)
-        self.setMovement(QListWidget.Snap)
+        self.setViewMode(QListWidget.ListMode)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
-        self.setIconSize(QSize(THUMB_W, int(THUMB_W * 1.42)))
+        self.setItemDelegate(ThumbnailDelegate(self))
         self.setSpacing(6)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._next = 0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._fill_batch)
         self.model().rowsMoved.connect(lambda *_: QTimer.singleShot(0, self._emit_order))
         self.rebuild()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.viewport().update()
+
     def rebuild(self, select: list[int] | None = None):
         self._timer.stop()
         self.blockSignals(True)
         self.clear()
+        thumb_h = int(THUMB_W * 1.42)
         for i in range(self.doc.page_count):
             item = QListWidgetItem(str(i + 1))
             item.setData(self.ORIG_ROLE, i)
             item.setTextAlignment(Qt.AlignCenter)
-            item.setSizeHint(QSize(THUMB_W + 16, int(THUMB_W * 1.42) + 24))
+            item.setSizeHint(QSize(THUMB_W + 20, thumb_h + 28))
             self.addItem(item)
         for r in select or []:
             if 0 <= r < self.count():
@@ -198,21 +254,50 @@ class DocTab(QWidget):
 
         self.side = QTabWidget()
         self.side.setTabPosition(QTabWidget.West)
-        self.side.addTab(self.thumbs, "Miniaturas")
-        self.side.addTab(self.bookmarks, "Marcadores")
-        self.side.addTab(self.comments, "Comentarios")
-        self.side.addTab(self.attachments, "Adjuntos")
+        self.side.setStyleSheet("""
+            QTabBar::tab {
+                min-width: 30px;
+                max-width: 36px;
+                padding: 10px 4px;
+                font-size: 13pt;
+            }
+        """)
+        self.side.addTab(self.thumbs, "📄")
+        self.side.addTab(self.bookmarks, "📑")
+        self.side.addTab(self.comments, "💬")
+        self.side.addTab(self.attachments, "📎")
+        self.side.setTabToolTip(0, "Miniaturas de páginas")
+        self.side.setTabToolTip(1, "Marcadores / Índice")
+        self.side.setTabToolTip(2, "Comentarios y notas")
+        self.side.setTabToolTip(3, "Archivos adjuntos embebidos")
         self._sync_side_tabs()
+
+        self.search_bar = FloatingSearchBar()
+        view_container = QWidget()
+        view_layout = QVBoxLayout(view_container)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+        view_layout.setSpacing(0)
+        view_layout.addWidget(self.search_bar)
+        view_layout.addWidget(self.view)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.side)
-        self.splitter.addWidget(self.view)
+        self.splitter.addWidget(view_container)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([190, 950])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
+
+        # Plegado inteligente del panel lateral para documentos simples (<= 2 págs sin anexos)
+        if (
+            doc.page_count <= 2
+            and self.bookmarks.topLevelItemCount() == 0
+            and self.comments.topLevelItemCount() == 0
+            and self.attachments.count() == 0
+        ):
+            self.side.hide()
 
         self.thumbs.currentRowChanged.connect(self.view.goto_page)
         self.bookmarks.itemClicked.connect(
@@ -223,6 +308,11 @@ class DocTab(QWidget):
         self.attachments.attachmentChanged.connect(self._on_attachment_changed)
         self.view.pageChanged.connect(self.thumbs.select_page)
         self.thumbs.orderChanged.connect(self._on_order_changed)
+
+        self.search_bar.searchTextChanged.connect(self._on_search_text)
+        self.search_bar.findNext.connect(self._find_next)
+        self.search_bar.findPrev.connect(self._find_prev)
+        self.search_bar.closed.connect(self.view.clear_search)
 
     def _on_attachment_changed(self):
         self.modified = True
@@ -254,11 +344,35 @@ class DocTab(QWidget):
         has_bm = self.bookmarks.topLevelItemCount() > 0
         self.side.setTabEnabled(1, has_bm)
         total_c = self.comments.topLevelItemCount()
-        self.side.setTabText(2, f"Comentarios ({total_c})" if total_c else "Comentarios")
+        self.side.setTabText(2, "💬")
+        self.side.setTabToolTip(2, f"Comentarios ({total_c})" if total_c else "Comentarios (0)")
         total_att = self.attachments.count()
-        self.side.setTabText(3, f"Adjuntos ({total_att})" if total_att else "Adjuntos")
+        self.side.setTabText(3, "📎")
+        self.side.setTabToolTip(3, f"Archivos adjuntos ({total_att})" if total_att else "Archivos adjuntos (0)")
         if not has_bm and self.side.currentIndex() == 1:
             self.side.setCurrentIndex(0)
+
+    # --------------------------------------------------------------- búsqueda
+    def show_search(self, initial_text: str = ""):
+        self.search_bar.show_and_focus(initial_text)
+        if initial_text:
+            self._on_search_text(initial_text)
+
+    def _on_search_text(self, text: str):
+        total = self.view.search(text)
+        if total > 0:
+            i, n = self.view.next_hit()
+            self.search_bar.set_result_status(i, n)
+        else:
+            self.search_bar.set_result_status(0, 0)
+
+    def _find_next(self):
+        i, n = self.view.next_hit()
+        self.search_bar.set_result_status(i, n)
+
+    def _find_prev(self):
+        i, n = self.view.prev_hit()
+        self.search_bar.set_result_status(i, n)
 
     # --------------------------------------------------------------- edición
     @property

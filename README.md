@@ -35,12 +35,17 @@ Para desarrolladores o usuarios que deseen modificar el código fuente con el en
 ### 1. Visor Avanzado
 - **Modos de visualización:** Página simple, desplazamiento vertical continuo y vista de dos páginas (estilo libro).
 - **Zoom fluido:** De 25% hasta 500%, botones de ajuste automático al ancho de página (`Ctrl+1`) y a página completa (`Ctrl+2`).
-- **Panel lateral:**
-  - **Miniaturas:** navegación visual rápida, selección múltiple y reordenamiento.
-  - **Marcadores / Índice:** navegación jerárquica por secciones y títulos del PDF.
-  - **Comentarios embebidos:** Árbol con todas las notas y resaltados existentes en el PDF.
-  - **Archivos adjuntos embebidos:** pestaña «Adjuntos» que detecta y lista todos los archivos incrustados en el PDF (cédulas de notificación, formularios Excel, manuales PDF anexos, hojas de cálculo, etc.) con sus iconos oficiales de Windows, peso y fecha. Permite abrirlos con doble clic, extraerlos o adjuntar nuevos archivos.
-- **Búsqueda interactiva:** Cuadro de búsqueda (`Ctrl+F`) con resaltado amarillo de coincidencias y navegación con `F3` / `Shift+F3`.
+- **Panel lateral compacto:**
+  - **Miniaturas (`📄`):** navegación visual rápida, selección múltiple y reordenamiento arrastrando.
+  - **Marcadores / Índice (`📑`):** navegación jerárquica por secciones y títulos del PDF.
+  - **Comentarios embebidos (`💬`):** árbol con todas las notas y resaltados existentes en el PDF con contador dinámico.
+  - **Archivos adjuntos embebidos (`📎`):** pestaña que detecta y lista todos los archivos incrustados en el PDF con sus iconos oficiales de Windows, peso y fecha.
+- **Impresión nativa directa (`Ctrl+P`):** Cuadro de diálogo oficial de Windows para imprimir a cualquier impresora física o virtual con selección de rango de páginas.
+- **Pastilla flotante de acciones rápidas:** Al seleccionar cualquier fragmento de texto con la herramienta de selección (`V`), se despliega una mini-burbuja flotante con acceso instantáneo a `[ Copiar ]`, `[ 🖍 Resaltar ]` y `[ ̶S̶ Tachar ]`.
+- **Plegado inteligente del panel lateral:** En documentos breves (1 o 2 páginas) sin marcadores ni adjuntos, el panel lateral inicia plegado automáticamente para una visualización a pantalla completa.
+- **Navegación ultra rápida con teclado:** Desplazamiento fluido con `Espacio` (avanzar) y `Shift+Espacio` (retroceder), flechas `←` / `→` o `RePág` / `AvPág`.
+- **Búsqueda flotante inteligente (`Ctrl+F`):** Barra flotante moderna estilo navegador/Acrobat en la esquina superior derecha que se despliega con `Ctrl+F` o botón lupa, cuenta coincidencias en tiempo real y se oculta con `Esc`.
+- **Pantalla de bienvenida y Documentos recientes:** Área inicial limpia con acceso directo a archivos abiertos recientemente (`Archivo -> Abrir recientes`), creación en blanco o arrastrar y soltar directo.
 - **Múltiples pestañas:** Apertura simultánea de varios documentos con navegación por pestañas independientes.
 - **Protección por contraseña:** Apertura y autenticación de documentos PDF protegidos.
 
@@ -151,7 +156,10 @@ Editor portable/
 │   ├── ocr.py                  # Integración del motor de OCR Tesseract de PyMuPDF
 │   ├── operations.py           # Manipulación de páginas (rotar, dividir, bates, marcas)
 │   ├── optimizer.py            # Motor de compresión y reducción de tamaño
-│   └── viewer.py               # Canvas gráfico, zoom, navegación y eventos del mouse
+│   ├── search_bar.py           # Barra de búsqueda flotante interactiva estilo navegador
+│   ├── selection_popup.py      # Mini-burbuja flotante de acciones rápidas sobre texto
+│   ├── viewer.py               # Canvas gráfico, zoom, navegación y eventos del mouse
+│   └── welcome.py              # Pantalla de bienvenida minimalista y documentos recientes
 ├── data/                       # Recursos estáticos de la aplicación
 │   ├── tessdata/               # Modelos entrenados de OCR (spa.traineddata, eng.traineddata)
 │   ├── app_icon.ico            # Icono oficial para el ejecutable y accesos directos

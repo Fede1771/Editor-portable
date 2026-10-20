@@ -5,8 +5,10 @@ from collections import OrderedDict
 
 import pymupdf as fitz
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap, QKeySequence
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QToolTip
+
+from .selection_popup import TextSelectionPopup
 
 MARGIN = 16
 GAP = 12
@@ -88,11 +90,19 @@ class PdfView(QAbstractScrollArea):
         self._hover_block: tuple[int, fitz.Rect] | None = None
         self._pen_stroke: list[tuple[float, float]] = []
         self._pen_page: int = -1
+        self._annots_cache: dict[int, list] = {}
+        self._blocks_cache: dict[int, list] = {}
+        self._last_selection_target: tuple[int, fitz.Rect] | None = None
+
+        self.popup = TextSelectionPopup(self.viewport())
+        self.popup.copyRequested.connect(self._copy_selection)
+        self.popup.highlightRequested.connect(self._highlight_selection)
+        self.popup.strikeoutRequested.connect(self._strikeout_selection)
 
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.viewport().setBackgroundRole(self.backgroundRole())
-        self.viewport().setStyleSheet("background-color: #5a5d63;")
+        self.viewport().setStyleSheet("background-color: #525659;")
         self._update_cursor()
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
@@ -129,9 +139,25 @@ class PdfView(QAbstractScrollArea):
             self._tool = tool
             self._dragging = False
             self._hover_block = None
+            self.popup.hide()
             self._update_cursor()
             self.toolChanged.emit(tool)
             self.viewport().update()
+
+    def _copy_selection(self):
+        if self._selected_text:
+            QApplication.clipboard().setText(self._selected_text)
+            self.textSelected.emit(self._selected_text)
+
+    def _highlight_selection(self):
+        if self._last_selection_target:
+            pno, rect = self._last_selection_target
+            self.highlightRequested.emit(pno, rect)
+
+    def _strikeout_selection(self):
+        if self._last_selection_target:
+            pno, rect = self._last_selection_target
+            self.strikeoutRequested.emit(pno, rect)
 
     def _update_cursor(self):
         if self._tool == TOOL_PAN:
@@ -213,6 +239,8 @@ class PdfView(QAbstractScrollArea):
         self.page_count = self.doc.page_count
         self._sizes = [(p.rect.width, p.rect.height) for p in self.doc]
         self._cache.clear()
+        self._annots_cache.clear()
+        self._blocks_cache.clear()
         self._current = min(self._current, max(0, self.page_count - 1))
         self._relayout()
 
@@ -378,6 +406,7 @@ class PdfView(QAbstractScrollArea):
         self.pageChanged.emit(self._current)
 
     def _on_scroll(self):
+        self.popup.hide()
         self._update_current()
         self.viewport().update()
 
@@ -559,6 +588,7 @@ class PdfView(QAbstractScrollArea):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
+        self.popup.hide()
         if event.button() == Qt.LeftButton:
             if self._tool == TOOL_PAN:
                 self._panning = True
@@ -595,21 +625,30 @@ class PdfView(QAbstractScrollArea):
                 self._drag_current = event.position()
             self.viewport().update()
         else:
-            # Inspección de comentarios o anotaciones embebidas al pasar el cursor
             pno, pt = self.viewport_to_page_point(event.position())
             tip_shown = False
             if pno is not None and pt is not None:
-                for annot in self.doc[pno].annots():
-                    if annot.rect.contains(pt):
-                        info = annot.info or {}
-                        t_type = annot.type[1] if isinstance(annot.type, tuple) else str(annot.type)
-                        author = info.get("title", "").strip()
-                        content = info.get("content", "").strip()
-                        if not content and t_type in ("Highlight", "Underline", "StrikeOut"):
-                            try:
-                                content = self.doc[pno].get_text("text", clip=annot.rect).strip()
-                            except Exception:
-                                pass
+                if pno not in self._annots_cache:
+                    cached = []
+                    try:
+                        page = self.doc[pno]
+                        for annot in page.annots():
+                            info = annot.info or {}
+                            t_type = annot.type[1] if isinstance(annot.type, tuple) else str(annot.type)
+                            author = info.get("title", "").strip()
+                            content = info.get("content", "").strip()
+                            if not content and t_type in ("Highlight", "Underline", "StrikeOut"):
+                                try:
+                                    content = page.get_text("text", clip=annot.rect).strip()
+                                except Exception:
+                                    pass
+                            cached.append((annot.rect, t_type, author, content))
+                    except Exception:
+                        pass
+                    self._annots_cache[pno] = cached
+
+                for r, t_type, author, content in self._annots_cache.get(pno, []):
+                    if r.contains(pt):
                         tip_lines = [f"[{t_type}]"]
                         if author:
                             tip_lines.append(f"Autor: {author}")
@@ -618,17 +657,31 @@ class PdfView(QAbstractScrollArea):
                         QToolTip.showText(event.globalPosition().toPoint(), "\n".join(tip_lines), self.viewport())
                         tip_shown = True
                         break
+
             if not tip_shown and self._tool != TOOL_TEXT:
                 QToolTip.hideText()
 
             if self._tool == TOOL_TEXT:
-                from . import content_ops as cops
-                pno, pt = self.viewport_to_page_point(event.position())
                 new_hover = None
                 if pno is not None and pt is not None:
-                    b = cops.find_text_block_at(self.doc[pno], pt)
-                    if b is not None:
-                        new_hover = (pno, b["bbox"])
+                    if pno not in self._blocks_cache:
+                        try:
+                            text_dict = self.doc[pno].get_text("dict")
+                            spans = []
+                            for b in text_dict.get("blocks", []):
+                                for line in b.get("lines", []):
+                                    for s in line.get("spans", []):
+                                        if s.get("text", "").strip():
+                                            spans.append(fitz.Rect(s["bbox"]))
+                            self._blocks_cache[pno] = spans
+                        except Exception:
+                            self._blocks_cache[pno] = []
+
+                    for r in self._blocks_cache.get(pno, []):
+                        if r.contains(pt):
+                            new_hover = (pno, r)
+                            break
+
                 if new_hover != self._hover_block:
                     self._hover_block = new_hover
                     if new_hover:
@@ -660,8 +713,10 @@ class PdfView(QAbstractScrollArea):
                             text = self.doc[pno].get_textbox(rect).strip()
                             if text:
                                 self._selected_text = text
+                                self._last_selection_target = (pno, rect)
                                 QApplication.clipboard().setText(text)
                                 self.textSelected.emit(text)
+                                self.popup.show_at(event.globalPosition().toPoint())
                         elif self._tool == TOOL_TEXT:
                             self.textRequested.emit(pno, rect)
                         elif self._tool == TOOL_REDACT:
@@ -683,16 +738,42 @@ class PdfView(QAbstractScrollArea):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key == Qt.Key_Right and self._mode != MODE_CONTINUOUS:
-            self.next_page()
-        elif key == Qt.Key_Left and self._mode != MODE_CONTINUOUS:
-            self.prev_page()
+        vbar = self.verticalScrollBar()
+        step = int(self.viewport().height() * 0.85)
+
+        if key in (Qt.Key_Right, Qt.Key_PageDown):
+            if self._mode == MODE_CONTINUOUS:
+                vbar.setValue(vbar.value() + step)
+            else:
+                self.next_page()
+            event.accept()
+        elif key in (Qt.Key_Left, Qt.Key_PageUp):
+            if self._mode == MODE_CONTINUOUS:
+                vbar.setValue(vbar.value() - step)
+            else:
+                self.prev_page()
+            event.accept()
+        elif key == Qt.Key_Space:
+            if event.modifiers() & Qt.ShiftModifier:
+                vbar.setValue(vbar.value() - step)
+            else:
+                vbar.setValue(vbar.value() + step)
+            event.accept()
+        elif key in (Qt.Key_Down, Qt.Key_J):
+            vbar.setValue(vbar.value() + 50)
+            event.accept()
+        elif key in (Qt.Key_Up, Qt.Key_K):
+            vbar.setValue(vbar.value() - 50)
+            event.accept()
         elif key == Qt.Key_Home:
             self.goto_page(0)
+            event.accept()
         elif key == Qt.Key_End:
             self.goto_page(self.page_count - 1)
+            event.accept()
         elif event.matches(QKeySequence.Copy):
             if self._selected_text:
                 QApplication.clipboard().setText(self._selected_text)
+            event.accept()
         else:
             super().keyPressEvent(event)

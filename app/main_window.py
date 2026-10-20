@@ -8,11 +8,12 @@ import tempfile
 
 import pymupdf as fitz
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter
+from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QTabWidget,
-    QToolBar, QWidget,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QStackedWidget,
+    QTabWidget, QToolBar, QToolButton, QWidget,
 )
 
 from . import content_ops as cops
@@ -30,6 +31,7 @@ from .dialogs import (
     OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
 )
 from .doc_tab import DocTab
+from .welcome import WelcomeWidget, add_recent_file, get_recent_files, clear_recent_files
 from .viewer import (
     FIT_NONE, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
     TOOL_HIGHLIGHT, TOOL_IMAGE, TOOL_LINK, TOOL_NOTE, TOOL_PAN, TOOL_PEN,
@@ -52,13 +54,23 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
+        self.stack = QStackedWidget()
+        self.welcome = WelcomeWidget(self)
+        self.welcome.openFileRequested.connect(self.open_dialog)
+        self.welcome.openRecentRequested.connect(self.open_file)
+        self.welcome.blankDocRequested.connect(self.create_blank)
+        self.welcome.combineRequested.connect(lambda: self._create_from_dialog([]))
+
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.setCentralWidget(self.tabs)
+
+        self.stack.addWidget(self.welcome)
+        self.stack.addWidget(self.tabs)
+        self.setCentralWidget(self.stack)
 
         self._build_actions()
         self._build_toolbar()
@@ -86,6 +98,7 @@ class MainWindow(QMainWindow):
         self.a_open = self._act("Abrir…", self.open_dialog, "Ctrl+O", "Abrir un PDF")
         self.a_save = self._act("Guardar", self.save_current, "Ctrl+S")
         self.a_save_as = self._act("Guardar como…", self.save_as_current, "Ctrl+Shift+S")
+        self.a_print = self._act("Imprimir…", self.print_document, "Ctrl+P", "Imprimir el documento actual")
         self.a_close = self._act("Cerrar pestaña", lambda: self.close_tab(self.tabs.currentIndex()), "Ctrl+W")
         self.a_quit = self._act("Salir", self.close, "Ctrl+Q")
 
@@ -109,9 +122,9 @@ class MainWindow(QMainWindow):
         self.a_prev = self._act("◀", lambda: v("prev_page"), None, "Página anterior")
         self.a_next = self._act("▶", lambda: v("next_page"), None, "Página siguiente")
         self.a_side = self._act("Panel lateral", self._toggle_side, "F4", "Mostrar u ocultar el panel lateral")
-        self.a_find = self._act("Buscar", self._focus_search, "Ctrl+F")
-        self.a_find_next = self._act("Siguiente", self._find_next, "F3")
-        self.a_find_prev = self._act("Anterior", self._find_prev, "Shift+F3")
+        self.a_find = self._act("🔍 Buscar…", self.show_find_bar, "Ctrl+F", "Buscar texto en el documento")
+        self.a_find_next = self._act("Buscar siguiente", self._find_next, "F3", "Ir a la coincidencia siguiente")
+        self.a_find_prev = self._act("Buscar anterior", self._find_prev, "Shift+F3", "Ir a la coincidencia anterior")
 
         # Organizar páginas
         self.a_insert = self._act("Insertar páginas desde PDF…", self.insert_pages)
@@ -197,6 +210,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         tb.addAction(self.a_open)
         tb.addAction(self.a_save)
+        tb.addAction(self.a_print)
         tb.addSeparator()
         tb.addAction(self.a_prev)
         self.page_spin = QSpinBox()
@@ -218,7 +232,6 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.zoom_combo)
         tb.addAction(self.a_zoom_in)
         tb.addAction(self.a_fit_w)
-        tb.addAction(self.a_fit_p)
         tb.addSeparator()
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Continuo", MODE_CONTINUOUS)
@@ -228,38 +241,41 @@ class MainWindow(QMainWindow):
             lambda _i: self._view_do("set_mode", self.mode_combo.currentData())
         )
         tb.addWidget(self.mode_combo)
-        tb.addAction(self.a_rot_l)
-        tb.addAction(self.a_rot_r)
         tb.addSeparator()
         tb.addAction(self.a_tool_pan)
         tb.addAction(self.a_tool_select)
         tb.addAction(self.a_tool_text)
         tb.addAction(self.a_tool_redact)
         tb.addAction(self.a_tool_image)
-        tb.addAction(self.a_tool_link)
-        tb.addAction(self.a_tool_pen)
-        tb.addAction(self.a_tool_highlight)
-        tb.addAction(self.a_tool_underline)
-        tb.addAction(self.a_tool_strikeout)
-        tb.addAction(self.a_tool_note)
+
+        btn_annot = QToolButton()
+        btn_annot.setText("🖍 Anotar ▾")
+        btn_annot.setToolTip("Más herramientas de dibujo y anotación")
+        btn_annot.setPopupMode(QToolButton.InstantPopup)
+        menu_annot = QMenu(btn_annot)
+        menu_annot.addAction(self.a_tool_highlight)
+        menu_annot.addAction(self.a_tool_underline)
+        menu_annot.addAction(self.a_tool_strikeout)
+        menu_annot.addAction(self.a_tool_pen)
+        menu_annot.addAction(self.a_tool_note)
+        menu_annot.addAction(self.a_tool_link)
+        btn_annot.setMenu(menu_annot)
+        tb.addWidget(btn_annot)
+
         tb.addSeparator()
         tb.addAction(self.a_side)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Buscar en el documento…")
-        self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setMinimumWidth(220)
-        self.search_edit.returnPressed.connect(self._do_search)
-        tb.addWidget(self.search_edit)
-        tb.addAction(self.a_find_prev)
-        tb.addAction(self.a_find_next)
+
+        tb.addAction(self.a_find)
 
     def _build_menu(self):
         mb = self.menuBar()
         m = mb.addMenu("&Archivo")
         m.addAction(self.a_open)
+        self.menu_recents = m.addMenu("Abrir &recientes")
+        self._update_recent_menu()
         sub = m.addMenu("&Crear PDF")
         for a in (self.a_new_files, self.a_combine, self.a_clip, self.a_scan, self.a_blank_doc):
             sub.addAction(a)
@@ -267,7 +283,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_export_word, self.a_export_excel, self.a_export_images, self.a_export_text, self.a_export_html):
             sub_export.addAction(a)
         m.addSeparator()
-        for a in (self.a_save, self.a_save_as, self.a_close):
+        for a in (self.a_save, self.a_save_as, self.a_print, self.a_close):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_quit)
@@ -275,6 +291,10 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("&Edición")
         m.addAction(self.a_undo)
         m.addAction(self.a_redo)
+        m.addSeparator()
+        m.addAction(self.a_find)
+        m.addAction(self.a_find_next)
+        m.addAction(self.a_find_prev)
         m.addSeparator()
         m.addAction(self.a_tool_select)
         m.addAction(self.a_tool_text)
@@ -316,11 +336,6 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("&Formularios")
         m.addAction(self.a_fill_forms)
         m.addAction(self.a_flatten_forms)
-
-        m = mb.addMenu("&Buscar")
-        m.addAction(self.a_find)
-        m.addAction(self.a_find_next)
-        m.addAction(self.a_find_prev)
 
         # Atajos válidos aunque el menú no tenga el foco
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
@@ -410,6 +425,10 @@ class MainWindow(QMainWindow):
             if doc.page_count == 0:
                 raise ValueError("El documento no tiene páginas.")
             self._add_tab(path, doc, save_as_only=save_as_only)
+            if path and os.path.exists(path):
+                add_recent_file(path)
+                self._update_recent_menu()
+                self.welcome.refresh_recents()
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "No se pudo abrir", f"{path}\n\n{exc}")
             return
@@ -441,6 +460,7 @@ class MainWindow(QMainWindow):
         idx = self.tabs.addTab(tab, tab.title)
         self.tabs.setTabToolTip(idx, path)
         self.tabs.setCurrentIndex(idx)
+        self.stack.setCurrentIndex(1)
 
         total_att = tab.attachments.count()
         if total_att > 0:
@@ -544,6 +564,49 @@ class MainWindow(QMainWindow):
         if tab:
             self._save_tab_as(tab)
 
+    def print_document(self):
+        tab = self.current_tab()
+        if not tab:
+            return
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(os.path.basename(tab.path) or "Documento")
+        dlg = QPrintDialog(printer, self)
+        dlg.setWindowTitle("Imprimir documento PDF")
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        painter = QPainter(printer)
+        try:
+            from_pg = printer.fromPage() - 1 if printer.fromPage() > 0 else 0
+            to_pg = printer.toPage() - 1 if printer.toPage() > 0 else tab.doc.page_count - 1
+            from_pg = max(0, min(tab.doc.page_count - 1, from_pg))
+            to_pg = max(from_pg, min(tab.doc.page_count - 1, to_pg))
+
+            dpi = printer.resolution()
+            scale = dpi / 72.0
+            mat = fitz.Matrix(scale, scale)
+
+            first = True
+            for pno in range(from_pg, to_pg + 1):
+                if not first:
+                    printer.newPage()
+                first = False
+                page = tab.doc[pno]
+                pm = page.get_pixmap(matrix=mat, alpha=False)
+                img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888)
+                target_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+                scaled = img.scaled(target_rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                x = target_rect.x() + (target_rect.width() - scaled.width()) / 2
+                y = target_rect.y() + (target_rect.height() - scaled.height()) / 2
+                painter.drawImage(int(x), int(y), scaled)
+            self.status_msg.setText("Documento enviado a la impresora.")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Error de impresión", f"No se pudo completar la impresión:\n{exc}")
+        finally:
+            painter.end()
+            QApplication.restoreOverrideCursor()
+
     # --------------------------------------------------------------- controles
     def _update_controls(self):
         tab = self.current_tab()
@@ -551,17 +614,21 @@ class MainWindow(QMainWindow):
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_prev, self.a_next, self.a_side, self.a_find,
                   self.a_find_next, self.a_find_prev, self.a_close, self.a_save, self.a_save_as,
+                  self.a_print,
                   *self.page_actions, *self.tool_actions, *self.utility_actions):
             a.setEnabled(has)
         self.a_undo.setEnabled(has and tab.can_undo)
         self.a_redo.setEnabled(has and tab.can_redo)
-        for w in (self.page_spin, self.zoom_combo, self.mode_combo, self.search_edit):
+        for w in (self.page_spin, self.zoom_combo, self.mode_combo):
             w.setEnabled(has)
         if not has:
             self.page_total.setText(" / 0 ")
             self.status_pages.setText("")
             self.setWindowTitle("Editor PDF Portable")
+            self.stack.setCurrentIndex(0)
+            self.welcome.refresh_recents()
             return
+        self.stack.setCurrentIndex(1)
         v = tab.view
         self.page_spin.blockSignals(True)
         self.page_spin.setMaximum(v.page_count)
@@ -1278,38 +1345,46 @@ class MainWindow(QMainWindow):
             f"Texto añadido a {self._label(pages)}", goto=tab.view.current_page)
 
     # ---------------------------------------------------------------- búsqueda
-    def _focus_search(self):
-        self.search_edit.setFocus()
-        self.search_edit.selectAll()
-
-    def _do_search(self):
+    def show_find_bar(self):
         tab = self.current_tab()
-        if not tab:
-            return
-        text = self.search_edit.text()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            n = tab.view.search(text)
-        finally:
-            QApplication.restoreOverrideCursor()
-        if not text.strip():
-            self.status_msg.setText("")
-        elif n:
-            self.status_msg.setText(f"Resultado 1 de {n}")
-        else:
-            self.status_msg.setText("Sin resultados")
+        if tab:
+            tab.show_search()
 
     def _find_next(self):
         tab = self.current_tab()
         if tab:
-            i, n = tab.view.next_hit()
-            self.status_msg.setText(f"Resultado {i} de {n}" if n else "Sin resultados")
+            tab._find_next()
 
     def _find_prev(self):
         tab = self.current_tab()
         if tab:
-            i, n = tab.view.prev_hit()
-            self.status_msg.setText(f"Resultado {i} de {n}" if n else "Sin resultados")
+            tab._find_prev()
+
+    # ---------------------------------------------------------------- documentos recientes
+    def _update_recent_menu(self):
+        if not hasattr(self, "menu_recents"):
+            return
+        self.menu_recents.clear()
+        recents = get_recent_files()
+        if not recents:
+            act = self.menu_recents.addAction("Sin documentos recientes")
+            act.setEnabled(False)
+            return
+
+        for p in recents:
+            name = os.path.basename(p)
+            act = self.menu_recents.addAction(f"📄 {name}")
+            act.setToolTip(p)
+            act.triggered.connect(lambda _checked=False, target=p: self.open_file(target))
+
+        self.menu_recents.addSeparator()
+        act_clear = self.menu_recents.addAction("Limpiar historial de recientes")
+        act_clear.triggered.connect(self._clear_recents)
+
+    def _clear_recents(self):
+        clear_recent_files()
+        self._update_recent_menu()
+        self.welcome.refresh_recents()
 
     # --------------------------------------------------------- arrastrar y soltar
     def dragEnterEvent(self, event):
