@@ -234,11 +234,10 @@ Editor portable/
 | `Ctrl + 2` | Ajustar vista a página completa |
 | `Espacio` / `Shift + Espacio` | Avanzar / retroceder pantalla en lectura |
 | `H` | Herramienta Mano (desplazamiento) |
-| `V` | Herramienta Seleccionar y copiar texto (con pastilla flotante) |
+| `V` | Herramienta Seleccionar y copiar texto (Predeterminada al abrir, con pastilla flotante y clic derecho) |
 | `T` | Herramienta Texto (editar in situ o insertar nuevo) |
 | `R` | Herramienta Censurar / Redactar por área |
 | `I` | Insertar imagen |
-| `Shift + F` | Estampar firma manuscrita personal |
 | `L` | Insertar hipervínculo |
 | `P` | Herramienta Lápiz / Trazo libre a mano alzada |
 | `Shift + H` | Resaltar texto o área seleccionada |

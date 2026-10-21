@@ -254,32 +254,25 @@ def main():
         _DocSnapshot.DISK_THRESHOLD = orig_thresh
     print("  -> Snapshots y Gestión Eficiente de Memoria OK")
 
-    # 12. Nuevas capacidades: Selección fluida, Ctrl+A, prefetch y lienzo de firma
-    print("[12/12] Probando selección inteligente, pre-fetch y módulo de firma...")
+    # 12. Nuevas capacidades: Selección fluida por defecto, Ctrl+A y pre-fetch
+    print("[12/12] Probando selección inteligente por defecto y pre-fetch...")
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import Qt, QPointF
     from PySide6.QtGui import QKeyEvent
     app = QApplication.instance() or QApplication(sys.argv)
     from app.viewer import PdfView, TOOL_SELECT
-    from app.dialogs import SignatureCanvas
 
     test_doc = fitz.open(str(pdf_path))
     view = PdfView(test_doc)
-    view.set_tool(TOOL_SELECT)
+    assert view._tool == TOOL_SELECT, "TOOL_SELECT debe ser la herramienta predeterminada"
     view._prefetch_adjacent_pages()
     assert len(view._cache) > 0, "Pre-fetching debió almacenar en caché páginas adyacentes"
 
     ev = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_A, Qt.ControlModifier)
     view.keyPressEvent(ev)
     assert len(view._selected_text) > 0, "Ctrl+A debió seleccionar texto de la página"
-
-    sig_canvas = SignatureCanvas()
-    sig_canvas._strokes = [[QPointF(5, 5), QPointF(50, 50)]]
-    sig_tmp = out_dir / "test_sig.png"
-    assert sig_canvas.save_png_transparent(str(sig_tmp)) is True, "Fallo al guardar firma transparente"
-    assert sig_tmp.exists(), "Archivo de firma no se guardó"
     test_doc.close()
-    print("  -> Selección inteligente, Pre-fetch y Firma OK")
+    print("  -> Selección inteligente predeterminada y Pre-fetch OK")
 
     # Limpieza de temporales de prueba
     import shutil

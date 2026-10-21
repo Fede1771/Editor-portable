@@ -35,7 +35,6 @@ TOOL_NOTE = "note"
 TOOL_HIGHLIGHT = "highlight"
 TOOL_UNDERLINE = "underline"
 TOOL_STRIKEOUT = "strikeout"
-TOOL_SIGN = "sign"
 
 
 class PdfView(QAbstractScrollArea):
@@ -50,7 +49,6 @@ class PdfView(QAbstractScrollArea):
     editBlockRequested = Signal(int, object) # (page_idx, fitz.Rect)
     redactRequested = Signal(int, object)    # (page_idx, fitz.Rect)
     imageRequested = Signal(int, object)     # (page_idx, fitz.Rect)
-    signatureRequested = Signal(int, object) # (page_idx, fitz.Point)
     linkRequested = Signal(int, object)      # (page_idx, fitz.Rect)
     penStrokeFinished = Signal(int, object)  # (page_idx, list[tuple[float, float]])
     noteRequested = Signal(int, object)      # (page_idx, fitz.Point)
@@ -72,7 +70,7 @@ class PdfView(QAbstractScrollArea):
         self._mode = MODE_CONTINUOUS
         self._rotation = 0
         self._current = 0
-        self._tool = TOOL_PAN
+        self._tool = TOOL_SELECT
 
         self._rows: list[list[int]] = []
         self._row_rects: list[QRectF] = []      # rectángulo de cada fila (coords de contenido)
@@ -814,11 +812,7 @@ class PdfView(QAbstractScrollArea):
                 else:
                     self._pen_page = -1
                     self._pen_stroke = []
-            elif self._tool == TOOL_SIGN:
-                pno, pt = self.viewport_to_page_point(event.position())
-                if pno is not None and pt is not None:
-                    self.signatureRequested.emit(pno, pt)
-                return
+
             else:
                 self._dragging = True
                 self._drag_start = event.position()
@@ -1179,6 +1173,20 @@ class PdfView(QAbstractScrollArea):
         if (key == Qt.Key_C and event.modifiers() & Qt.ControlModifier) or event.matches(QKeySequence.Copy):
             if self._selected_text:
                 self._copy_selection()
+                event.accept()
+                return
+
+        if self._selected_text:
+            if key == Qt.Key_H and (event.modifiers() & Qt.ShiftModifier):
+                self._highlight_selection()
+                event.accept()
+                return
+            if key == Qt.Key_U and (event.modifiers() & Qt.ShiftModifier):
+                self._underline_selection()
+                event.accept()
+                return
+            if key == Qt.Key_K and (event.modifiers() & Qt.ShiftModifier):
+                self._strikeout_selection()
                 event.accept()
                 return
 
