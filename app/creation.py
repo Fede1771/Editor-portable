@@ -8,11 +8,31 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import sys
 
 import pymupdf as fitz
 
-APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(APP_ROOT, "data")
+
+def _resolve_data_dir() -> str:
+    """Resuelve la ruta del directorio data/ de forma robusta."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        meipass = getattr(sys, "_MEIPASS", exe_dir)
+        candidates.extend([
+            os.path.join(meipass, "data"),
+            os.path.join(exe_dir, "_internal", "data"),
+            os.path.join(exe_dir, "data"),
+        ])
+    app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(app_root, "data"))
+    for cand in candidates:
+        if os.path.isdir(cand):
+            return cand
+    return candidates[0]
+
+
+DATA_DIR = _resolve_data_dir()
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".jpe", ".bmp", ".gif", ".tif", ".tiff", ".jp2"}
 OFFICE_EXTS = {".doc", ".docx", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp"}

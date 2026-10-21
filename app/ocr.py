@@ -2,12 +2,32 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Callable, Sequence
 
 import pymupdf as fitz
 
-APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TESSDATA_DIR = os.path.join(APP_ROOT, "data", "tessdata")
+
+def _resolve_tessdata_dir() -> str:
+    """Resuelve la ruta de tessdata de forma robusta tanto en desarrollo como en ejecutable portable."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        meipass = getattr(sys, "_MEIPASS", exe_dir)
+        candidates.extend([
+            os.path.join(meipass, "data", "tessdata"),
+            os.path.join(exe_dir, "_internal", "data", "tessdata"),
+            os.path.join(exe_dir, "data", "tessdata"),
+        ])
+    app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(app_root, "data", "tessdata"))
+    for cand in candidates:
+        if os.path.isdir(cand):
+            return cand
+    return candidates[0]
+
+
+TESSDATA_DIR = _resolve_tessdata_dir()
 
 
 def get_available_languages() -> dict[str, str]:

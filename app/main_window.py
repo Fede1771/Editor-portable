@@ -49,9 +49,16 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self._current_tool = TOOL_PAN
 
-        icon_path = Path(__file__).resolve().parent.parent / "data" / "app_icon.png"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        icon_candidates = [
+            Path(sys.executable).parent / "_internal" / "data" / "app_icon.png" if getattr(sys, "frozen", False) else None,
+            Path(sys.executable).parent / "data" / "app_icon.png" if getattr(sys, "frozen", False) else None,
+            Path(__file__).resolve().parent.parent / "data" / "app_icon.png",
+            Path(__file__).resolve().parent / "data" / "app_icon.png",
+        ]
+        for p in icon_candidates:
+            if p and p.exists():
+                self.setWindowIcon(QIcon(str(p)))
+                break
 
         self.stack = QStackedWidget()
         self.welcome = WelcomeWidget(self)
