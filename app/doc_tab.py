@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pymupdf as fitz
 from PySide6.QtCore import QItemSelectionModel, QRect, QSize, Qt, QTimer, Signal
@@ -231,6 +232,49 @@ class CommentTree(QTreeWidget):
         return total_comments
 
 
+class _DocSnapshot:
+    """Instantánea de documento para Undo/Redo.
+    Para PDFs estándar (<15 MB) permanece en memoria RAM para máxima velocidad.
+    Para PDFs de gran peso (>=15 MB) se vuelca temporalmente a disco para evitar
+    saturación de memoria.
+    """
+
+    DISK_THRESHOLD = 15 * 1024 * 1024  # 15 MB
+
+    def __init__(self, data: bytes):
+        self._size = len(data)
+        self._temp_path: str | None = None
+        if self._size >= self.DISK_THRESHOLD:
+            fd, path = tempfile.mkstemp(prefix="editorpdf_snap_", suffix=".tmp")
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            self._temp_path = path
+            self._data: bytes | None = None
+        else:
+            self._data = data
+
+    def get_bytes(self) -> bytes:
+        if self._data is not None:
+            return self._data
+        if self._temp_path and os.path.isfile(self._temp_path):
+            with open(self._temp_path, "rb") as f:
+                return f.read()
+        return b""
+
+    def cleanup(self) -> None:
+        if self._temp_path:
+            try:
+                if os.path.isfile(self._temp_path):
+                    os.remove(self._temp_path)
+            except Exception:
+                pass
+            self._temp_path = None
+        self._data = None
+
+    def __del__(self):
+        self.cleanup()
+
+
 class DocTab(QWidget):
     """Un documento abierto, con historial de cambios (deshacer / rehacer)."""
 
@@ -244,8 +288,8 @@ class DocTab(QWidget):
         self.modified = False
         self.save_as_only = False
         self.suggested = "documento.pdf"
-        self._undo: list[bytes] = []
-        self._redo: list[bytes] = []
+        self._undo: list[_DocSnapshot] = []
+        self._redo: list[_DocSnapshot] = []
 
         self.view = PdfView(doc)
         self.thumbs = ThumbnailList(doc)
@@ -397,6 +441,12 @@ class DocTab(QWidget):
         self.search_bar.set_result_status(i, n)
 
     # --------------------------------------------------------------- edición
+    @staticmethod
+    def _clear_snapshots(snapshots: list[_DocSnapshot]) -> None:
+        for s in snapshots:
+            s.cleanup()
+        snapshots.clear()
+
     @property
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -407,30 +457,43 @@ class DocTab(QWidget):
 
     def run_edit(self, fn, select: list[int] | None = None, goto: int | None = None):
         """Aplica `fn(doc)` guardando una copia para deshacer. Si falla, restaura el documento."""
-        snapshot = self.doc.tobytes()
+        snapshot = _DocSnapshot(self.doc.tobytes())
         try:
             fn(self.doc)
         except Exception:
-            self._load_bytes(snapshot)
+            self._load_bytes(snapshot.get_bytes())
             self.view.reload(self.doc)
+            snapshot.cleanup()
             raise
         self._undo.append(snapshot)
-        del self._undo[:-UNDO_LIMIT]
-        self._redo.clear()
+        while len(self._undo) > UNDO_LIMIT:
+            old_snap = self._undo.pop(0)
+            old_snap.cleanup()
+        self._clear_snapshots(self._redo)
         self.modified = True
         self._refresh(select, goto)
 
     def undo(self):
         if self._undo:
-            self._redo.append(self.doc.tobytes())
-            self._load_bytes(self._undo.pop())
+            snap = self._undo.pop()
+            self._redo.append(_DocSnapshot(self.doc.tobytes()))
+            while len(self._redo) > UNDO_LIMIT:
+                old_snap = self._redo.pop(0)
+                old_snap.cleanup()
+            self._load_bytes(snap.get_bytes())
+            snap.cleanup()
             self.modified = True
             self._refresh()
 
     def redo(self):
         if self._redo:
-            self._undo.append(self.doc.tobytes())
-            self._load_bytes(self._redo.pop())
+            snap = self._redo.pop()
+            self._undo.append(_DocSnapshot(self.doc.tobytes()))
+            while len(self._undo) > UNDO_LIMIT:
+                old_snap = self._undo.pop(0)
+                old_snap.cleanup()
+            self._load_bytes(snap.get_bytes())
+            snap.cleanup()
             self.modified = True
             self._refresh()
 
@@ -480,4 +543,6 @@ class DocTab(QWidget):
 
     def close_document(self):
         self.thumbs._timer.stop()
+        self._clear_snapshots(self._undo)
+        self._clear_snapshots(self._redo)
         self.doc.close()

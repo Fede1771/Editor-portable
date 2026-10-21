@@ -2,6 +2,11 @@
 import os
 from pathlib import Path
 import sys
+import warnings
+
+# Suprimir advertencia transitoria de la API clásica de PyMuPDF
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"fitz(\..*)?")
+warnings.filterwarnings("ignore", message=r".*The `fitz` API is deprecated.*", category=FutureWarning)
 
 # Soporte de Splash nativo de PyInstaller (se muestra en <50ms por el bootloader en C)
 try:

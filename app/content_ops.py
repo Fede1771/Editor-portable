@@ -15,6 +15,7 @@ def add_text_box(
     fontsize: float = 12.0,
     fontname: str = "helv",
     color: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    align: int = fitz.TEXT_ALIGN_LEFT,
 ) -> None:
     """Inserta un cuadro de texto en la página especificada."""
     page = doc[page_idx]
@@ -32,7 +33,7 @@ def add_text_box(
         fontsize=fontsize,
         fontname=fontname,
         color=color,
-        align=fitz.TEXT_ALIGN_LEFT,
+        align=align,
     )
 
 
@@ -612,17 +613,3 @@ def replace_text_block(
         shape.finish(color=(0.12, 0.12, 0.12), width=0.75)
         shape.commit()
 
-
-def add_text_box(
-    doc: fitz.Document,
-    page_idx: int,
-    rect: fitz.Rect,
-    text: str,
-    fontsize: float = 12.0,
-    fontname: str = "helv",
-    color: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    align: int = fitz.TEXT_ALIGN_LEFT,
-) -> None:
-    """Inserta un nuevo cuadro de texto en la posición especificada."""
-    page = doc[page_idx]
-    page.insert_textbox(rect, text, fontsize=fontsize, fontname=fontname, color=color, align=align)

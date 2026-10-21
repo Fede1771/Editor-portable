@@ -4,7 +4,12 @@ Ejecuta validaciones integrales de operaciones, edición in situ, creación, OCR
 """
 import sys
 import os
+import warnings
 from pathlib import Path
+
+# Suprimir advertencia transitoria de la API clásica de PyMuPDF
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"fitz(\..*)?")
+warnings.filterwarnings("ignore", message=r".*The `fitz` API is deprecated.*", category=FutureWarning)
 
 # Agregar raíz al sys.path
 ROOT = Path(__file__).resolve().parent.parent
@@ -222,6 +227,32 @@ def main():
     assert spoofed_check["is_safe"] is False, "URL suplantada debió ser detectada como spoofing"
     doc.close()
     print("  -> Seguridad, Sanitización y Anti-Phishing OK")
+
+    # 11. Snapshots de memoria y vuelco a disco para Undo/Redo
+    print("[11/11] Probando snapshots de memoria y volcado a disco en Undo/Redo...")
+    from app.doc_tab import _DocSnapshot
+    # Prueba en memoria (<15MB)
+    small_data = b"%PDF-1.4 test data in memory"
+    snap_mem = _DocSnapshot(small_data)
+    assert snap_mem._temp_path is None, "Snapshot pequeño debió permanecer en RAM"
+    assert snap_mem.get_bytes() == small_data
+    snap_mem.cleanup()
+
+    # Prueba con umbral superado (simulamos temporalmente umbral bajo)
+    orig_thresh = _DocSnapshot.DISK_THRESHOLD
+    try:
+        _DocSnapshot.DISK_THRESHOLD = 50  # forzar volcado con > 50 bytes
+        big_data = b"%PDF-1.4 " + (b"X" * 100)
+        snap_disk = _DocSnapshot(big_data)
+        assert snap_disk._temp_path is not None, "Snapshot grande debió volcarse a disco"
+        temp_file = snap_disk._temp_path
+        assert os.path.isfile(temp_file), "Archivo temporal debió ser creado en disco"
+        assert snap_disk.get_bytes() == big_data, "Los bytes leídos desde disco deben coincidir"
+        snap_disk.cleanup()
+        assert not os.path.exists(temp_file), "Archivo temporal debió ser eliminado en cleanup"
+    finally:
+        _DocSnapshot.DISK_THRESHOLD = orig_thresh
+    print("  -> Snapshots y Gestión Eficiente de Memoria OK")
 
     # Limpieza de temporales de prueba
     import shutil
