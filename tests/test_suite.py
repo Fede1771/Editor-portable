@@ -171,7 +171,7 @@ def main():
     print("  -> Formularios y Aplanado OK")
 
     # 9. Archivos adjuntos embebidos (Attachments)
-    print("[9/9] Probando gestión de archivos adjuntos embebidos...")
+    print("[9/10] Probando gestión de archivos adjuntos embebidos...")
     from app import attachments as att_mod
     doc = fitz.open()
     doc.new_page()
@@ -186,6 +186,42 @@ def main():
     assert doc.embfile_count() == 0, "El adjunto debió ser eliminado"
     doc.close()
     print("  -> Archivos Adjuntos OK")
+
+    # 10. Módulo de Seguridad y Anti-Phishing
+    print("[10/10] Probando módulo de seguridad, sanitización y anti-phishing...")
+    from app import security as sec_mod
+    doc = fitz.open()
+    doc.new_page()
+    doc.set_metadata({"author": "Usuario Privado", "creator": "App Interna", "title": "Confidencial"})
+    cat = doc.pdf_catalog()
+    doc.xref_set_key(cat, "OpenAction", "<< /S /Launch /F (powershell.exe) >>")
+
+    sec_info = sec_mod.scan_document_security(doc)
+    assert sec_info["has_threats"] is True, "El escáner de seguridad debió detectar la amenaza OpenAction"
+    assert sec_info["has_launch"] is True, "Debió detectar acción /Launch"
+
+    # Sanitizar
+    cleaned = sec_mod.sanitize_document(doc)
+    assert cleaned >= 1, f"Debió sanitizar al menos 1 elemento, limpió {cleaned}"
+    sec_info_after = sec_mod.scan_document_security(doc)
+    assert sec_info_after["has_threats"] is False, "Tras sanitizar no deben quedar amenazas"
+
+    # Sanitizar metadatos
+    sec_mod.sanitize_metadata(doc)
+    assert doc.metadata["author"] == "", "El autor debió ser eliminado"
+    assert doc.metadata["title"] == "", "El título debió ser eliminado"
+
+    # Comprobación de URLs anti-phishing
+    safe_check = sec_mod.check_url_safety("https://buenosaires.gob.ar/tramites")
+    assert safe_check["is_safe"] is True, "URL legítima debió ser segura"
+
+    suspicious_check = sec_mod.check_url_safety("http://192.168.1.50/update.exe")
+    assert suspicious_check["is_safe"] is False, "URL con IP directa y .exe debió ser marcada como sospechosa"
+
+    spoofed_check = sec_mod.check_url_safety("https://sitio-malicioso.com", visible_text="afip.gob.ar")
+    assert spoofed_check["is_safe"] is False, "URL suplantada debió ser detectada como spoofing"
+    doc.close()
+    print("  -> Seguridad, Sanitización y Anti-Phishing OK")
 
     # Limpieza de temporales de prueba
     import shutil

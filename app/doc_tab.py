@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from .viewer import PdfView
 from .attachments import AttachmentWidget
 from .search_bar import FloatingSearchBar
+from .security import SecurityBanner, scan_document_security, sanitize_document
 
 THUMB_W = 120
 UNDO_LIMIT = 15
@@ -272,11 +273,15 @@ class DocTab(QWidget):
         self.side.setTabToolTip(3, "Archivos adjuntos embebidos")
         self._sync_side_tabs()
 
+        self.security_banner = SecurityBanner(self)
+        self.security_banner.sanitizeRequested.connect(self.sanitize_security)
+
         self.search_bar = FloatingSearchBar()
         view_container = QWidget()
         view_layout = QVBoxLayout(view_container)
         view_layout.setContentsMargins(0, 0, 0, 0)
         view_layout.setSpacing(0)
+        view_layout.addWidget(self.security_banner)
         view_layout.addWidget(self.search_bar)
         view_layout.addWidget(self.view)
 
@@ -313,6 +318,23 @@ class DocTab(QWidget):
         self.search_bar.findNext.connect(self._find_next)
         self.search_bar.findPrev.connect(self._find_prev)
         self.search_bar.closed.connect(self.view.clear_search)
+        self.check_security()
+
+    def check_security(self):
+        """Verifica pasivamente si el documento contiene scripts o acciones automáticas."""
+        sec = scan_document_security(self.doc)
+        if sec.get("has_threats"):
+            self.security_banner.show_threats(sec)
+        else:
+            self.security_banner.hide()
+
+    def sanitize_security(self):
+        """Desactiva y remueve permanentemente scripts y acciones del documento."""
+        self.push_undo()
+        cleaned = sanitize_document(self.doc)
+        self.modified = True
+        self.security_banner.show_cleaned()
+        self.edited.emit()
 
     def _on_attachment_changed(self):
         self.modified = True

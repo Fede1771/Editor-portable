@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QCursor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -226,7 +226,7 @@ class WelcomeWidget(QWidget):
             item = QListWidgetItem()
             widget = RecentFileItem(path)
             widget.openRequested.connect(self.openRecentRequested.emit)
-            item.setSizeHint(widget.sizeHint())
+            item.setSizeHint(QSize(0, 48))
             self.recents_list.addItem(item)
             self.recents_list.setItemWidget(item, widget)
 

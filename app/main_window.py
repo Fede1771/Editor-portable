@@ -9,7 +9,6 @@ import tempfile
 import pymupdf as fitz
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter
-from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QStackedWidget,
@@ -98,6 +97,8 @@ class MainWindow(QMainWindow):
         self.a_open = self._act("Abrir…", self.open_dialog, "Ctrl+O", "Abrir un PDF")
         self.a_save = self._act("Guardar", self.save_current, "Ctrl+S")
         self.a_save_as = self._act("Guardar como…", self.save_as_current, "Ctrl+Shift+S")
+        self.a_save_sanitized = self._act("Guardar copia anónima…", self.save_sanitized_current,
+                                          tip="Guarda una copia despojada de metadatos, nombres de autor y scripts")
         self.a_print = self._act("Imprimir…", self.print_document, "Ctrl+P", "Imprimir el documento actual")
         self.a_close = self._act("Cerrar pestaña", lambda: self.close_tab(self.tabs.currentIndex()), "Ctrl+W")
         self.a_quit = self._act("Salir", self.close, "Ctrl+Q")
@@ -283,7 +284,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_export_word, self.a_export_excel, self.a_export_images, self.a_export_text, self.a_export_html):
             sub_export.addAction(a)
         m.addSeparator()
-        for a in (self.a_save, self.a_save_as, self.a_print, self.a_close):
+        for a in (self.a_save, self.a_save_as, self.a_save_sanitized, self.a_print, self.a_close):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_quit)
@@ -450,6 +451,7 @@ class MainWindow(QMainWindow):
         tab.view.highlightRequested.connect(lambda pno, rect, t=tab: self._on_highlight_requested(t, pno, rect))
         tab.view.underlineRequested.connect(lambda pno, rect, t=tab: self._on_underline_requested(t, pno, rect))
         tab.view.strikeoutRequested.connect(lambda pno, rect, t=tab: self._on_strikeout_requested(t, pno, rect))
+        tab.view.linkActivated.connect(self._on_link_activated)
         tab.view.textSelected.connect(lambda txt: self.status_msg.setText(f"Texto copiado ({len(txt)} caracteres) al portapapeles."))
         tab.view.set_tool(self._current_tool)
         tab.edited.connect(lambda t=tab: self._on_edited(t))
@@ -564,10 +566,46 @@ class MainWindow(QMainWindow):
         if tab:
             self._save_tab_as(tab)
 
+    def save_sanitized_current(self):
+        tab = self.current_tab()
+        if not tab:
+            return
+        from .security import sanitize_metadata, sanitize_document
+        base = os.path.splitext(os.path.basename(tab.path) if tab.path else "documento")[0]
+        suggested = f"{base}_anonimo.pdf"
+        out_path, _ = QFileDialog.getSaveFileName(self, "Guardar copia anónima y sanitizada", suggested, PDF_FILTER)
+        if not out_path:
+            return
+
+        copy_doc = fitz.open()
+        copy_doc.insert_pdf(tab.doc)
+        sanitize_metadata(copy_doc)
+        sanitize_document(copy_doc)
+        try:
+            copy_doc.save(out_path, deflate=True, garbage=4)
+            copy_doc.close()
+            QMessageBox.information(
+                self,
+                "Copia anónima guardada",
+                f"Se ha guardado exitosamente la copia sanitizada en:\n{out_path}\n\n"
+                "• Metadatos de autor, software e historial: Eliminados.\n"
+                "• Identificadores XML / XMP de rastreo: Eliminados.\n"
+                "• Scripts y acciones automáticas: Removidos.",
+            )
+            self.status_msg.setText(f"Copia anónima guardada: {out_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error al guardar", f"No se pudo guardar la copia anónima:\n{exc}")
+
+    def _on_link_activated(self, uri: str, text: str):
+        from .security import SafeLinkDialog
+        dlg = SafeLinkDialog(uri, text=text, parent=self)
+        dlg.exec()
+
     def print_document(self):
         tab = self.current_tab()
         if not tab:
             return
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setDocName(os.path.basename(tab.path) or "Documento")
         dlg = QPrintDialog(printer, self)
@@ -614,7 +652,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_prev, self.a_next, self.a_side, self.a_find,
                   self.a_find_next, self.a_find_prev, self.a_close, self.a_save, self.a_save_as,
-                  self.a_print,
+                  self.a_save_sanitized, self.a_print,
                   *self.page_actions, *self.tool_actions, *self.utility_actions):
             a.setEnabled(has)
         self.a_undo.setEnabled(has and tab.can_undo)
@@ -785,26 +823,29 @@ class MainWindow(QMainWindow):
             goto=pno,
         )
 
-    def _on_highlight_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
+    def _on_highlight_requested(self, tab: DocTab, pno: int, rect: fitz.Rect | list):
+        rects = rect if isinstance(rect, list) else [rect]
         self._edit(
             tab,
-            lambda d: annot_mod.add_highlight_annotation(d, pno, [rect]),
+            lambda d: annot_mod.add_highlight_annotation(d, pno, rects),
             f"Texto resaltado en página {pno + 1}",
             goto=pno,
         )
 
-    def _on_underline_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
+    def _on_underline_requested(self, tab: DocTab, pno: int, rect: fitz.Rect | list):
+        rects = rect if isinstance(rect, list) else [rect]
         self._edit(
             tab,
-            lambda d: annot_mod.add_underline_annotation(d, pno, [rect]),
+            lambda d: annot_mod.add_underline_annotation(d, pno, rects),
             f"Subrayado añadido en página {pno + 1}",
             goto=pno,
         )
 
-    def _on_strikeout_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
+    def _on_strikeout_requested(self, tab: DocTab, pno: int, rect: fitz.Rect | list):
+        rects = rect if isinstance(rect, list) else [rect]
         self._edit(
             tab,
-            lambda d: annot_mod.add_strikeout_annotation(d, pno, [rect]),
+            lambda d: annot_mod.add_strikeout_annotation(d, pno, rects),
             f"Tachado añadido en página {pno + 1}",
             goto=pno,
         )

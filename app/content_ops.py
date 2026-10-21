@@ -45,6 +45,12 @@ def apply_redaction(
 ) -> None:
     """Censura / redacta físicamente el área rectangular especificada."""
     page = doc[page_idx]
+    for w in list(page.widgets()):
+        if w.rect.intersects(rect):
+            page.delete_widget(w)
+    for a in list(page.annots()):
+        if a.rect.intersects(rect):
+            page.delete_annot(a)
     page.add_redact_annot(rect, text=text, fill=fill_color)
     page.apply_redactions()
 
@@ -220,13 +226,18 @@ def find_text_block_at(
 
     cluster = []
     # Caso 1: El usuario arrastró un recuadro de selección deliberado con el ratón
-    if selection_rect is not None and selection_rect.width > 20 and selection_rect.height > 10:
+    if selection_rect is not None and selection_rect.width > 15 and selection_rect.height > 6:
         for s in all_spans:
             s_rect = fitz.Rect(s["bbox"])
-            if selection_rect.intersects(s_rect):
+            v_overlap = max(0.0, min(selection_rect.y1, s_rect.y1) - max(selection_rect.y0, s_rect.y0))
+            h_overlap = max(0.0, min(selection_rect.x1, s_rect.x1) - max(selection_rect.x0, s_rect.x0))
+            sh = max(1.0, s_rect.height)
+            sw = max(1.0, s_rect.width)
+            # Solo incluir spans que estén sustancialmente dentro de la selección vertical y horizontalmente
+            if v_overlap >= 0.5 * sh and h_overlap >= 0.25 * sw:
                 cluster.append(s)
 
-    # Caso 2: Clic puntual: aislar la tarjeta / celda / bloque que contiene el punto
+    # Caso 2: Clic puntual o selección de fila: aislar exactamente la fila/renglón horizontal
     if not cluster:
         target_span = None
         min_dist = float("inf")
@@ -244,37 +255,51 @@ def find_text_block_at(
         if target_span is None:
             return None
 
-        card_x0, card_x1 = target_span["bbox"][0], target_span["bbox"][2]
-        card_y0, card_y1 = target_span["bbox"][1], target_span["bbox"][3]
+        tb = fitz.Rect(target_span["bbox"])
+        th = max(1.0, tb.height)
 
-        # Expandir la tarjeta uniendo spans adyacentes horizontal y verticalmente
-        # Dentro de una misma tarjeta el espacio vertical entre renglones es <= 5 pt
-        changed = True
-        while changed:
-            changed = False
-            for s in all_spans:
-                sx0, sy0, sx1, sy1 = s["bbox"]
-                horiz_overlap = max(card_x0 - 8, sx0) <= min(card_x1 + 8, sx1)
-                vert_overlap = (sy0 <= card_y1 + 5.0) and (sy1 >= card_y0 - 5.0)
-                if horiz_overlap and vert_overlap:
-                    if sx0 < card_x0:
-                        card_x0 = sx0
-                        changed = True
-                    if sx1 > card_x1:
-                        card_x1 = sx1
-                        changed = True
-                    if sy0 < card_y0:
-                        card_y0 = sy0
-                        changed = True
-                    if sy1 > card_y1:
-                        card_y1 = sy1
-                        changed = True
+        # Buscar todos los spans de la misma fila/renglón horizontal (evitando invadir filas adyacentes)
+        row_spans = []
+        for s in all_spans:
+            sb = fitz.Rect(s["bbox"])
+            sh = max(1.0, sb.height)
+            v_overlap = max(0.0, min(tb.y1, sb.y1) - max(tb.y0, sb.y0))
+            # Pertenecen a la misma fila si comparten al menos el 45% de su altura vertical
+            if v_overlap >= 0.45 * min(th, sh):
+                row_spans.append(s)
 
-        cluster = [
-            s for s in all_spans
-            if (s["bbox"][0] >= card_x0 - 4 and s["bbox"][2] <= card_x1 + 4)
-            and (s["bbox"][1] >= card_y0 - 4 and s["bbox"][3] <= card_y1 + 4)
-        ]
+        row_spans.sort(key=lambda s: s["bbox"][0])
+        target_idx = -1
+        for idx, s in enumerate(row_spans):
+            if s is target_span or fitz.Rect(s["bbox"]) == tb:
+                target_idx = idx
+                break
+
+        if target_idx >= 0:
+            left_spans = []
+            cur_x0 = row_spans[target_idx]["bbox"][0]
+            for i in range(target_idx - 1, -1, -1):
+                s = row_spans[i]
+                if cur_x0 - s["bbox"][2] <= 45.0:
+                    left_spans.append(s)
+                    cur_x0 = s["bbox"][0]
+                else:
+                    break
+            left_spans.reverse()
+
+            right_spans = []
+            cur_x1 = row_spans[target_idx]["bbox"][2]
+            for i in range(target_idx + 1, len(row_spans)):
+                s = row_spans[i]
+                if s["bbox"][0] - cur_x1 <= 45.0:
+                    right_spans.append(s)
+                    cur_x1 = s["bbox"][2]
+                else:
+                    break
+
+            cluster = left_spans + [row_spans[target_idx]] + right_spans
+        else:
+            cluster = row_spans
 
     if not cluster:
         return None
@@ -373,17 +398,25 @@ def find_text_block_at(
 
     # 4. Detección automática de alineación
     detected_align = fitz.TEXT_ALIGN_LEFT
-    if len(lines_map) >= 1:
+    if len(lines_map) > 1:
         center_diffs = []
+        left_diffs = []
         for line in lines_map:
             lx0 = min(s["bbox"][0] for s in line)
             lx1 = max(s["bbox"][2] for s in line)
             lw = lx1 - lx0
             center_diffs.append(abs((bbox.x0 + bbox.width / 2.0) - (lx0 + lw / 2.0)))
-        if len(center_diffs) > 1 and max(center_diffs) <= 4.0:
+            left_diffs.append(abs(lx0 - bbox.x0))
+        if max(center_diffs) <= 4.0 and max(center_diffs) < max(left_diffs):
             detected_align = fitz.TEXT_ALIGN_CENTER
-        elif len(center_diffs) == 1 and center_diffs[0] <= 3.0 and bbox.width > 30.0:
+    elif len(lines_map) == 1:
+        # Para un único renglón, sólo es centrado si está alineado al centro de la página
+        page_center = page.rect.width / 2.0
+        line_center = bbox.x0 + bbox.width / 2.0
+        if abs(line_center - page_center) <= 15.0 and bbox.width < page.rect.width * 0.7:
             detected_align = fitz.TEXT_ALIGN_CENTER
+        else:
+            detected_align = fitz.TEXT_ALIGN_LEFT
 
     card_border = detect_card_border(page, bbox)
 
@@ -511,14 +544,23 @@ def replace_text_block(
         )
     else:
         # Texto libre sin recuadro: acotar la redacción al espacio exacto del texto
-        redact_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
         needed_w = max(
             (fitz.get_text_length(line, fontname=fontname, fontsize=fontsize) for line in new_text.splitlines()),
             default=0.0
         )
         actual_w = max(bbox.width, needed_w + 4.0)
         actual_w = min(actual_w, page.rect.width - bbox.x0 - 8)
+        # La zona de redacción debe cubrir tanto el bbox original como la expansión del nuevo texto
+        redact_rect = fitz.Rect(bbox.x0, bbox.y0, max(bbox.x1, bbox.x0 + actual_w), bbox.y1 + 1.0)
         target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y1 + 2.0)
+
+    # Eliminar cualquier campo interactivo (widget/AcroForm) o anotación que coincida con la zona
+    for w in list(page.widgets()):
+        if w.rect.intersects(redact_rect) or w.rect.intersects(target_rect):
+            page.delete_widget(w)
+    for a in list(page.annots()):
+        if a.rect.intersects(redact_rect) or a.rect.intersects(target_rect):
+            page.delete_annot(a)
 
     # Redactar texto evitando en todo momento eliminar trazados vectoriales o líneas
     page.add_redact_annot(redact_rect, fill=fill_color)

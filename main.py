@@ -3,6 +3,13 @@ import os
 from pathlib import Path
 import sys
 
+# Soporte de Splash nativo de PyInstaller (se muestra en <50ms por el bootloader en C)
+try:
+    import pyi_splash
+    pyi_splash.update_text("Iniciando aplicación...")
+except ImportError:
+    pass
+
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -25,6 +32,14 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+
+    # Cerrar splash nativo tan pronto la ventana principal está lista y visible
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except ImportError:
+        pass
+
     for path in sys.argv[1:]:
         if path.lower().endswith(".pdf"):
             window.open_file(path)
