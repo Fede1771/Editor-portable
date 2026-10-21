@@ -362,6 +362,7 @@ class DocTab(QWidget):
         self.search_bar.findNext.connect(self._find_next)
         self.search_bar.findPrev.connect(self._find_prev)
         self.search_bar.closed.connect(self.view.clear_search)
+        self.view.searchRequested.connect(self.show_search)
         self.check_security()
 
     def check_security(self):

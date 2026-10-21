@@ -6,7 +6,7 @@ from collections import OrderedDict
 import pymupdf as fitz
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap, QKeySequence
-from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QToolTip
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu, QToolTip
 
 from .selection_popup import TextSelectionPopup
 
@@ -55,6 +55,7 @@ class PdfView(QAbstractScrollArea):
     underlineRequested = Signal(int, object) # (page_idx, fitz.Rect)
     strikeoutRequested = Signal(int, object) # (page_idx, fitz.Rect)
     textSelected = Signal(str)               # Texto seleccionado copiado
+    searchRequested = Signal(str)            # Solicitar búsqueda de texto
     linkActivated = Signal(str, str)         # (uri, visible_text) enlace externo clickeado
 
     def __init__(self, doc: fitz.Document, parent=None):
@@ -165,6 +166,14 @@ class PdfView(QAbstractScrollArea):
         elif self._last_selection_target:
             pno, rect = self._last_selection_target
             self.highlightRequested.emit(pno, [rect])
+        self.popup.hide()
+
+    def _underline_selection(self):
+        if self._selection_line_rects and self._selection_page >= 0:
+            self.underlineRequested.emit(self._selection_page, list(self._selection_line_rects))
+        elif self._last_selection_target:
+            pno, rect = self._last_selection_target
+            self.underlineRequested.emit(pno, [rect])
         self.popup.hide()
 
     def _strikeout_selection(self):
@@ -924,10 +933,106 @@ class PdfView(QAbstractScrollArea):
 
         super().mouseReleaseEvent(event)
 
+    def contextMenuEvent(self, event):
+        self.popup.hide()
+        global_pos = event.globalPos()
+        pos = event.pos()
+
+        # Si no hay texto seleccionado previamente, comprobar si el clic derecho fue sobre texto de la página
+        if not self._selected_text.strip():
+            pno, pt = self.viewport_to_page_point(pos)
+            if pno is not None and pt is not None:
+                try:
+                    words = self.doc[pno].get_text("words")
+                    for w in words:
+                        w_rect = fitz.Rect(w[0], w[1], w[2], w[3])
+                        if w_rect.contains(pt):
+                            word_text = w[4].strip()
+                            if word_text:
+                                self._selection_page = pno
+                                self._selection_line_rects = [w_rect]
+                                self._selected_text = word_text
+                                self._last_selection_target = (pno, w_rect)
+                                self.viewport().update()
+                            break
+                except Exception:
+                    pass
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #c8ccd0;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 9pt;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 10px;
+                border-radius: 4px;
+                color: #202124;
+            }
+            QMenu::item:selected {
+                background-color: #e8f0fe;
+                color: #1a73e8;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #dadce0;
+                margin: 4px 6px;
+            }
+        """)
+
+        if self._selected_text.strip():
+            act_copy = menu.addAction("📋 Copiar")
+            act_copy.setShortcut(QKeySequence.Copy)
+            act_copy.triggered.connect(self._copy_selection)
+
+            menu.addSeparator()
+
+            act_hl = menu.addAction("🖍 Resaltar")
+            act_hl.triggered.connect(self._highlight_selection)
+
+            act_ul = menu.addAction("̲U̲ Subrayar")
+            act_ul.triggered.connect(self._underline_selection)
+
+            act_so = menu.addAction("̶S̶ Tachar")
+            act_so.triggered.connect(self._strikeout_selection)
+
+            menu.addSeparator()
+
+            snippet = self._selected_text.strip().replace("\n", " ")
+            if len(snippet) > 22:
+                snippet = snippet[:20] + "…"
+            act_search = menu.addAction(f"🔍 Buscar «{snippet}»")
+            act_search.triggered.connect(lambda: self.searchRequested.emit(self._selected_text.strip()))
+        else:
+            act_fit_w = menu.addAction("Ajustar al ancho")
+            act_fit_w.triggered.connect(self.fit_width)
+
+            act_fit_p = menu.addAction("Ajustar a página completa")
+            act_fit_p.triggered.connect(self.fit_page)
+
+            menu.addSeparator()
+
+            act_zoom_in = menu.addAction("Acercar zoom")
+            act_zoom_in.triggered.connect(self.zoom_in)
+
+            act_zoom_out = menu.addAction("Alejar zoom")
+            act_zoom_out.triggered.connect(self.zoom_out)
+
+        menu.exec(global_pos)
+
     def keyPressEvent(self, event):
         key = event.key()
         vbar = self.verticalScrollBar()
         step = int(self.viewport().height() * 0.85)
+
+        if (key == Qt.Key_C and event.modifiers() & Qt.ControlModifier) or event.matches(QKeySequence.Copy):
+            if self._selected_text:
+                self._copy_selection()
+                event.accept()
+                return
 
         if key == Qt.Key_Escape:
             self._selection_line_rects.clear()
