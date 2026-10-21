@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import OrderedDict
 
 import pymupdf as fitz
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap, QKeySequence
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu, QToolTip
 
@@ -35,6 +35,7 @@ TOOL_NOTE = "note"
 TOOL_HIGHLIGHT = "highlight"
 TOOL_UNDERLINE = "underline"
 TOOL_STRIKEOUT = "strikeout"
+TOOL_SIGN = "sign"
 
 
 class PdfView(QAbstractScrollArea):
@@ -46,8 +47,10 @@ class PdfView(QAbstractScrollArea):
     toolChanged = Signal(str)
 
     textRequested = Signal(int, object)      # (page_idx, fitz.Rect)
+    editBlockRequested = Signal(int, object) # (page_idx, fitz.Rect)
     redactRequested = Signal(int, object)    # (page_idx, fitz.Rect)
     imageRequested = Signal(int, object)     # (page_idx, fitz.Rect)
+    signatureRequested = Signal(int, object) # (page_idx, fitz.Point)
     linkRequested = Signal(int, object)      # (page_idx, fitz.Rect)
     penStrokeFinished = Signal(int, object)  # (page_idx, list[tuple[float, float]])
     noteRequested = Signal(int, object)      # (page_idx, fitz.Point)
@@ -101,10 +104,19 @@ class PdfView(QAbstractScrollArea):
         self._links_cache: dict[int, list[dict]] = {}
         self._last_selection_target: tuple[int, fitz.Rect] | None = None
 
+        self._last_click_time = 0.0
+        self._last_click_pos = QPointF()
+        self._click_count = 0
+
         self.popup = TextSelectionPopup(self.viewport())
         self.popup.copyRequested.connect(self._copy_selection)
         self.popup.highlightRequested.connect(self._highlight_selection)
         self.popup.strikeoutRequested.connect(self._strikeout_selection)
+
+        self._prefetch_timer = QTimer(self)
+        self._prefetch_timer.setSingleShot(True)
+        self._prefetch_timer.setInterval(120)
+        self._prefetch_timer.timeout.connect(self._prefetch_adjacent_pages)
 
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
@@ -438,6 +450,24 @@ class PdfView(QAbstractScrollArea):
         self.popup.hide()
         self._update_current()
         self.viewport().update()
+        if hasattr(self, "_prefetch_timer"):
+            self._prefetch_timer.start(120)
+
+    def _prefetch_adjacent_pages(self):
+        """Pre-renderiza en segundo plano las páginas adyacentes para scroll fluido e instantáneo."""
+        if self.page_count <= 1:
+            return
+        p = self._current
+        candidates = []
+        if p + 1 < self.page_count:
+            candidates.append(p + 1)
+        if p - 1 >= 0:
+            candidates.append(p - 1)
+        for cand in candidates:
+            try:
+                self._pixmap(cand)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ renderizado
     def _pixmap(self, i: int) -> QPixmap:
@@ -527,54 +557,79 @@ class PdfView(QAbstractScrollArea):
             res.append(fitz.Rect(min(w[0] for w in lw), min(w[1] for w in lw), max(w[2] for w in lw), max(w[3] for w in lw)))
         return res
 
+    def _find_closest_word_index(self, words: list, pt: fitz.Point) -> int:
+        best_idx = -1
+        min_dist = float("inf")
+        for i, w in enumerate(words):
+            wr = fitz.Rect(w[0], w[1], w[2], w[3])
+            if wr.contains(pt):
+                return i
+            cx = (w[0] + w[2]) * 0.5
+            cy = (w[1] + w[3]) * 0.5
+            d = (cx - pt.x) ** 2 + (cy - pt.y) ** 2
+            if d < min_dist:
+                min_dist = d
+                best_idx = i
+        return best_idx
+
     def _update_text_selection(self, start_pos: QPointF, current_pos: QPointF):
-        """Calcula la selección de texto fluida ajustada a las líneas y palabras reales."""
-        pno, sel_rect = self.viewport_to_page_rect(start_pos, current_pos)
-        if pno is None or sel_rect is None or sel_rect.is_empty:
+        """Calcula la selección de texto fluida continua en orden de lectura natural."""
+        pno1, pt1 = self.viewport_to_page_point(start_pos)
+        pno2, pt2 = self.viewport_to_page_point(current_pos)
+        if pno1 is None and pno2 is None:
             self._selection_line_rects = []
             self._selection_page = -1
             self._selected_text = ""
             return
 
+        pno = pno1 if pno1 is not None else pno2
+        pt1 = pt1 or pt2
+        pt2 = pt2 or pt1
+
         if pno not in self._words_cache:
             try:
-                self._words_cache[pno] = self.doc[pno].get_text("words")
+                raw_words = self.doc[pno].get_text("words")
+                self._words_cache[pno] = sorted(raw_words, key=lambda w: (w[5], w[6], w[7]))
             except Exception:
                 self._words_cache[pno] = []
         words = self._words_cache.get(pno, [])
 
-        selected_words = []
-        for w in words:
-            w_rect = fitz.Rect(w[0], w[1], w[2], w[3])
-            if sel_rect.intersects(w_rect):
-                cx = (w[0] + w[2]) * 0.5
-                cy = (w[1] + w[3]) * 0.5
-                if sel_rect.contains(fitz.Point(cx, cy)) or (sel_rect & w_rect).get_area() >= 0.25 * w_rect.get_area():
-                    selected_words.append(w)
+        if not words:
+            sel_rect = fitz.Rect(min(pt1.x, pt2.x), min(pt1.y, pt2.y), max(pt1.x, pt2.x), max(pt1.y, pt2.y))
+            if not sel_rect.is_empty:
+                self._selection_page = pno
+                self._selection_line_rects = [sel_rect]
+                try:
+                    self._selected_text = self.doc[pno].get_textbox(sel_rect).strip()
+                except Exception:
+                    self._selected_text = ""
+            return
 
-        if selected_words:
-            lines_dict: dict[tuple[int, int], list] = {}
-            for w in selected_words:
-                lines_dict.setdefault((w[5], w[6]), []).append(w)
+        i1 = self._find_closest_word_index(words, pt1)
+        i2 = self._find_closest_word_index(words, pt2)
 
-            sorted_lines = sorted(lines_dict.values(), key=lambda lw: (min(w[1] for w in lw), min(w[0] for w in lw)))
-            line_rects = []
-            text_lines = []
-            for lw in sorted_lines:
-                lw.sort(key=lambda w: (w[0], w[7]))
-                line_rects.append(fitz.Rect(min(w[0] for w in lw), min(w[1] for w in lw), max(w[2] for w in lw), max(w[3] for w in lw)))
-                text_lines.append(" ".join(w[4] for w in lw))
+        if i1 < 0 or i2 < 0:
+            return
 
-            self._selection_page = pno
-            self._selection_line_rects = line_rects
-            self._selected_text = "\n".join(text_lines).strip()
-        else:
-            self._selection_page = pno
-            self._selection_line_rects = [sel_rect]
-            try:
-                self._selected_text = self.doc[pno].get_textbox(sel_rect).strip()
-            except Exception:
-                self._selected_text = ""
+        start_idx = min(i1, i2)
+        end_idx = max(i1, i2)
+        selected_words = words[start_idx : end_idx + 1]
+
+        lines_dict: dict[tuple[int, int], list] = {}
+        for w in selected_words:
+            lines_dict.setdefault((w[5], w[6]), []).append(w)
+
+        sorted_lines = sorted(lines_dict.values(), key=lambda lw: (min(w[1] for w in lw), min(w[0] for w in lw)))
+        line_rects = []
+        text_lines = []
+        for lw in sorted_lines:
+            lw.sort(key=lambda w: (w[0], w[7]))
+            line_rects.append(fitz.Rect(min(w[0] for w in lw), min(w[1] for w in lw), max(w[2] for w in lw), max(w[3] for w in lw)))
+            text_lines.append(" ".join(w[4] for w in lw))
+
+        self._selection_page = pno
+        self._selection_line_rects = line_rects
+        self._selected_text = "\n".join(text_lines).strip()
 
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
@@ -700,6 +755,50 @@ class PdfView(QAbstractScrollArea):
 
     def mousePressEvent(self, event):
         self.popup.hide()
+        now = event.timestamp()
+        if (now - self._last_click_time < 350) and (event.position() - self._last_click_pos).manhattanLength() < 5:
+            self._click_count += 1
+        else:
+            self._click_count = 1
+        self._last_click_time = now
+        self._last_click_pos = event.position()
+
+        # Detección de triple clic para seleccionar el renglón/línea completo
+        if event.button() == Qt.LeftButton and self._click_count == 3:
+            pno, pt = self.viewport_to_page_point(event.position())
+            if pno is not None and pt is not None:
+                if pno not in self._words_cache:
+                    try:
+                        raw_words = self.doc[pno].get_text("words")
+                        self._words_cache[pno] = sorted(raw_words, key=lambda w: (w[5], w[6], w[7]))
+                    except Exception:
+                        self._words_cache[pno] = []
+                words = self._words_cache.get(pno, [])
+                hit_w = None
+                for w in words:
+                    if fitz.Rect(w[0], w[1], w[2], w[3]).contains(pt):
+                        hit_w = w
+                        break
+                if hit_w is not None:
+                    line_words = [w for w in words if (w[5], w[6]) == (hit_w[5], hit_w[6])]
+                    line_words.sort(key=lambda w: (w[0], w[7]))
+                    line_r = fitz.Rect(
+                        min(w[0] for w in line_words),
+                        min(w[1] for w in line_words),
+                        max(w[2] for w in line_words),
+                        max(w[3] for w in line_words),
+                    )
+                    self._selection_page = pno
+                    self._selection_line_rects = [line_r]
+                    self._selected_text = " ".join(w[4] for w in line_words).strip()
+                    self._last_selection_target = (pno, line_r)
+                    QApplication.clipboard().setText(self._selected_text)
+                    self.textSelected.emit(self._selected_text)
+                    self.popup.show_at(event.globalPosition().toPoint())
+                    self.viewport().update()
+                    event.accept()
+                    return
+
         if event.button() == Qt.LeftButton:
             if self._tool == TOOL_PAN:
                 self._panning = True
@@ -715,6 +814,11 @@ class PdfView(QAbstractScrollArea):
                 else:
                     self._pen_page = -1
                     self._pen_stroke = []
+            elif self._tool == TOOL_SIGN:
+                pno, pt = self.viewport_to_page_point(event.position())
+                if pno is not None and pt is not None:
+                    self.signatureRequested.emit(pno, pt)
+                return
             else:
                 self._dragging = True
                 self._drag_start = event.position()
@@ -725,6 +829,33 @@ class PdfView(QAbstractScrollArea):
                     self._selected_text = ""
                 self.viewport().update()
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        """Doble clic: selecciona instantáneamente la palabra completa bajo el cursor."""
+        if event.button() == Qt.LeftButton:
+            pno, pt = self.viewport_to_page_point(event.position())
+            if pno is not None and pt is not None:
+                if pno not in self._words_cache:
+                    try:
+                        raw_words = self.doc[pno].get_text("words")
+                        self._words_cache[pno] = sorted(raw_words, key=lambda w: (w[5], w[6], w[7]))
+                    except Exception:
+                        self._words_cache[pno] = []
+                words = self._words_cache.get(pno, [])
+                for w in words:
+                    wr = fitz.Rect(w[0], w[1], w[2], w[3])
+                    if wr.contains(pt):
+                        self._selection_page = pno
+                        self._selection_line_rects = [wr]
+                        self._selected_text = w[4].strip()
+                        self._last_selection_target = (pno, wr)
+                        QApplication.clipboard().setText(self._selected_text)
+                        self.textSelected.emit(self._selected_text)
+                        self.popup.show_at(event.globalPosition().toPoint())
+                        self.viewport().update()
+                        event.accept()
+                        return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._panning:
@@ -1001,6 +1132,9 @@ class PdfView(QAbstractScrollArea):
 
             menu.addSeparator()
 
+            act_edit = menu.addAction("✏️ Editar este texto…")
+            act_edit.triggered.connect(self._on_edit_selection_requested)
+
             snippet = self._selected_text.strip().replace("\n", " ")
             if len(snippet) > 22:
                 snippet = snippet[:20] + "…"
@@ -1023,6 +1157,20 @@ class PdfView(QAbstractScrollArea):
 
         menu.exec(global_pos)
 
+    def _on_edit_selection_requested(self):
+        if self._selection_line_rects and self._selection_page >= 0:
+            union_rect = fitz.Rect(
+                min(r.x0 for r in self._selection_line_rects),
+                min(r.y0 for r in self._selection_line_rects),
+                max(r.x1 for r in self._selection_line_rects),
+                max(r.y1 for r in self._selection_line_rects),
+            )
+            self.editBlockRequested.emit(self._selection_page, union_rect)
+        elif self._last_selection_target:
+            pno, rect = self._last_selection_target
+            self.editBlockRequested.emit(pno, rect)
+        self.popup.hide()
+
     def keyPressEvent(self, event):
         key = event.key()
         vbar = self.verticalScrollBar()
@@ -1033,6 +1181,35 @@ class PdfView(QAbstractScrollArea):
                 self._copy_selection()
                 event.accept()
                 return
+
+        if (key == Qt.Key_A and event.modifiers() & Qt.ControlModifier) or event.matches(QKeySequence.SelectAll):
+            pno = self._current
+            if 0 <= pno < self.page_count:
+                if pno not in self._words_cache:
+                    try:
+                        raw_words = self.doc[pno].get_text("words")
+                        self._words_cache[pno] = sorted(raw_words, key=lambda w: (w[5], w[6], w[7]))
+                    except Exception:
+                        self._words_cache[pno] = []
+                words = self._words_cache.get(pno, [])
+                if words:
+                    lines_dict: dict[tuple[int, int], list] = {}
+                    for w in words:
+                        lines_dict.setdefault((w[5], w[6]), []).append(w)
+                    sorted_lines = sorted(lines_dict.values(), key=lambda lw: (min(w[1] for w in lw), min(w[0] for w in lw)))
+                    line_rects = []
+                    for lw in sorted_lines:
+                        line_rects.append(fitz.Rect(min(w[0] for w in lw), min(w[1] for w in lw), max(w[2] for w in lw), max(w[3] for w in lw)))
+                    self._selection_page = pno
+                    self._selection_line_rects = line_rects
+                    self._selected_text = self.doc[pno].get_text("text").strip()
+                    if line_rects:
+                        self._last_selection_target = (pno, fitz.Rect(min(r.x0 for r in line_rects), min(r.y0 for r in line_rects), max(r.x1 for r in line_rects), max(r.y1 for r in line_rects)))
+                    QApplication.clipboard().setText(self._selected_text)
+                    self.textSelected.emit(self._selected_text)
+                    self.viewport().update()
+                    event.accept()
+                    return
 
         if key == Qt.Key_Escape:
             self._selection_line_rects.clear()

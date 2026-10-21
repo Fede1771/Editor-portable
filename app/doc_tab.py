@@ -8,8 +8,9 @@ import pymupdf as fitz
 from PySide6.QtCore import QItemSelectionModel, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QListWidget, QListWidgetItem, QSplitter, QStyle,
-    QStyledItemDelegate, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QFileDialog, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+    QSplitter, QStyle, QStyledItemDelegate, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from .viewer import PdfView
@@ -357,6 +358,8 @@ class DocTab(QWidget):
         self.attachments.attachmentChanged.connect(self._on_attachment_changed)
         self.view.pageChanged.connect(self.thumbs.select_page)
         self.thumbs.orderChanged.connect(self._on_order_changed)
+        self.thumbs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.thumbs.customContextMenuRequested.connect(self._on_thumb_context_menu)
 
         self.search_bar.searchTextChanged.connect(self._on_search_text)
         self.search_bar.findNext.connect(self._find_next)
@@ -394,6 +397,119 @@ class DocTab(QWidget):
                 self.view.scroll_to_page_rect(pno, rect)
             else:
                 self.view.goto_page(pno)
+
+    def _on_thumb_context_menu(self, pos):
+        item = self.thumbs.itemAt(pos)
+        if item is not None and not item.isSelected():
+            self.thumbs.clearSelection()
+            item.setSelected(True)
+            self.thumbs.setCurrentItem(item)
+
+        sel = self.thumbs.selected_rows()
+        if not sel:
+            p = self.view.current_page
+            if 0 <= p < self.doc.page_count:
+                sel = [p]
+
+        if not sel:
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #c8ccd0;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 9pt;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 10px;
+                border-radius: 4px;
+                color: #202124;
+            }
+            QMenu::item:selected {
+                background-color: #e8f0fe;
+                color: #1a73e8;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #dadce0;
+                margin: 4px 6px;
+            }
+        """)
+
+        num_txt = f"{len(sel)} página{'s' if len(sel) > 1 else ''}"
+
+        act_rot_cw = menu.addAction("🔄 Girar 90° a la derecha")
+        act_rot_cw.triggered.connect(lambda: self._rotate_thumb_pages(sel, 90))
+
+        act_rot_ccw = menu.addAction("🔄 Girar 90° a la izquierda")
+        act_rot_ccw.triggered.connect(lambda: self._rotate_thumb_pages(sel, 270))
+
+        menu.addSeparator()
+
+        act_dup = menu.addAction(f"📋 Duplicar {num_txt}")
+        act_dup.triggered.connect(lambda: self._duplicate_thumb_pages(sel))
+
+        act_del = menu.addAction(f"🗑 Eliminar {num_txt}")
+        act_del.triggered.connect(lambda: self._delete_thumb_pages(sel))
+
+        menu.addSeparator()
+
+        last_p = sel[-1]
+        act_blank = menu.addAction("📄 Insertar página en blanco después")
+        act_blank.triggered.connect(lambda: self._insert_blank_after(last_p))
+
+        act_extract = menu.addAction(f"📤 Extraer {num_txt} a nuevo PDF…")
+        act_extract.triggered.connect(lambda: self._extract_thumb_pages(sel))
+
+        menu.exec(self.thumbs.viewport().mapToGlobal(pos))
+
+    def _rotate_thumb_pages(self, pages: list[int], angle: int):
+        from . import operations as ops
+        self.run_edit(lambda d: ops.rotate_pages(d, pages, angle), select=pages)
+
+    def _duplicate_thumb_pages(self, pages: list[int]):
+        from . import operations as ops
+        self.run_edit(lambda d: ops.duplicate_pages(d, pages), select=pages)
+
+    def _delete_thumb_pages(self, pages: list[int]):
+        from . import operations as ops
+        if len(pages) >= self.doc.page_count:
+            QMessageBox.warning(self, "No permitido", "No puedes eliminar todas las páginas del documento.")
+            return
+        r = QMessageBox.question(
+            self,
+            "Eliminar páginas",
+            f"¿Deseas eliminar {len(pages)} página(s) seleccionada(s)?\nEsta acción se puede deshacer con Ctrl+Z.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if r == QMessageBox.Yes:
+            self.run_edit(lambda d: ops.delete_pages(d, pages))
+
+    def _insert_blank_after(self, page_idx: int):
+        from . import operations as ops
+        target = page_idx + 1
+        self.run_edit(lambda d: ops.insert_blank(d, target, like=page_idx), select=[target], goto=target)
+
+    def _extract_thumb_pages(self, pages: list[int]):
+        from . import operations as ops
+        base = os.path.splitext(self.path)[0] if self.path else "documento"
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar páginas extraídas",
+            f"{base}_paginas.pdf",
+            "Documentos PDF (*.pdf)",
+        )
+        if out_path:
+            ops.extract_pages(self.doc, pages, out_path)
+            QMessageBox.information(
+                self,
+                "Páginas extraídas",
+                f"Se han extraído {len(pages)} página(s) correctamente en:\n{out_path}",
+            )
 
     # ------------------------------------------------------------------ datos
     @property

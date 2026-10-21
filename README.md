@@ -221,6 +221,8 @@ Editor portable/
 | `Ctrl + Shift + N` | Combinar archivos en un PDF |
 | `Ctrl + Z` | Deshacer última acción |
 | `Ctrl + Y` | Rehacer última acción |
+| `Ctrl + C` | Copiar texto seleccionado al portapapeles |
+| `Ctrl + A` | Seleccionar todo el texto de la página actual |
 | `Ctrl + F` | Abrir buscador de texto flotante |
 | `Esc` | Cerrar buscador / Cancelar selección de texto |
 | `F3` / `Shift + F3` | Coincidencia siguiente / anterior en búsqueda |
@@ -236,6 +238,7 @@ Editor portable/
 | `T` | Herramienta Texto (editar in situ o insertar nuevo) |
 | `R` | Herramienta Censurar / Redactar por área |
 | `I` | Insertar imagen |
+| `Shift + F` | Estampar firma manuscrita personal |
 | `L` | Insertar hipervínculo |
 | `P` | Herramienta Lápiz / Trazo libre a mano alzada |
 | `Shift + H` | Resaltar texto o área seleccionada |

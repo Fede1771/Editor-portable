@@ -28,14 +28,15 @@ from .background import run_blocking
 from .dialogs import (
     AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, ConvertImagesDialog,
     CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog, OcrDialog,
-    OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
+    OptimizeDialog, SignatureDialog, SplitDialog, TextEditDialog, WatermarkDialog,
+    get_signature_path,
 )
 from .doc_tab import DocTab
 from .welcome import WelcomeWidget, add_recent_file, get_recent_files, clear_recent_files
 from .viewer import (
     FIT_NONE, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
     TOOL_HIGHLIGHT, TOOL_IMAGE, TOOL_LINK, TOOL_NOTE, TOOL_PAN, TOOL_PEN,
-    TOOL_REDACT, TOOL_SELECT, TOOL_STRIKEOUT, TOOL_TEXT, TOOL_UNDERLINE,
+    TOOL_REDACT, TOOL_SELECT, TOOL_SIGN, TOOL_STRIKEOUT, TOOL_TEXT, TOOL_UNDERLINE,
 )
 
 ZOOM_PRESETS = ["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%"]
@@ -165,6 +166,8 @@ class MainWindow(QMainWindow):
         self.a_tool_underline = self._act("⎁ Subrayar", lambda: self._set_active_tool(TOOL_UNDERLINE), "Shift+U", "Subrayar texto", checkable=True)
         self.a_tool_strikeout = self._act("̶S̶ Tachar", lambda: self._set_active_tool(TOOL_STRIKEOUT), "Shift+K", "Tachar texto", checkable=True)
         self.a_tool_note = self._act("💬 Nota", lambda: self._set_active_tool(TOOL_NOTE), "N", "Agregar nota adhesiva o comentario", checkable=True)
+        self.a_tool_sign = self._act("🖋️ Firmar", self._activate_sign_tool, "Shift+F", "Estampar firma manuscrita personal en el documento", checkable=True)
+        self.a_config_sign = self._act("Configurar firma personal…", self.configure_signature, None, "Dibujar o cargar imagen de firma manuscrita")
 
         self.a_fill_forms = self._act("Completar campos de formulario…", self.fill_form_fields, None, "Inspeccionar y editar campos de formulario (AcroForms)")
         self.a_flatten_forms = self._act("Aplanar formulario (Flatten)…", self.flatten_form_fields, None, "Convertir campos interactivos en contenido estático fijo")
@@ -173,7 +176,7 @@ class MainWindow(QMainWindow):
         self.tool_group.setExclusive(True)
         for a in (
             self.a_tool_pan, self.a_tool_select, self.a_tool_text, self.a_tool_redact,
-            self.a_tool_image, self.a_tool_link, self.a_tool_pen, self.a_tool_highlight,
+            self.a_tool_image, self.a_tool_sign, self.a_tool_link, self.a_tool_pen, self.a_tool_highlight,
             self.a_tool_underline, self.a_tool_strikeout, self.a_tool_note,
         ):
             self.tool_group.addAction(a)
@@ -256,6 +259,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.a_tool_text)
         tb.addAction(self.a_tool_redact)
         tb.addAction(self.a_tool_image)
+        tb.addAction(self.a_tool_sign)
 
         btn_annot = QToolButton()
         btn_annot.setText("🖍 Anotar ▾")
@@ -331,6 +335,9 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_optimize)
         m.addAction(self.a_attachments)
         m.addSeparator()
+        m.addAction(self.a_tool_sign)
+        m.addAction(self.a_config_sign)
+        m.addSeparator()
         m.addAction(self.a_find_redact)
         m.addAction(self.a_extract_imgs)
 
@@ -356,7 +363,7 @@ class MainWindow(QMainWindow):
                   self.a_tool_pan, self.a_tool_select, self.a_tool_text,
                   self.a_tool_redact, self.a_tool_image, self.a_tool_link,
                   self.a_tool_pen, self.a_tool_highlight, self.a_tool_underline,
-                  self.a_tool_strikeout, self.a_tool_note):
+                  self.a_tool_strikeout, self.a_tool_note, self.a_tool_sign):
             self.addAction(a)
 
     def _fill_pages_menu(self, m: QMenu, full: bool):
@@ -451,6 +458,8 @@ class MainWindow(QMainWindow):
         tab.view.pageChanged.connect(lambda _p, t=tab: self._sync_if_current(t))
         tab.view.zoomChanged.connect(lambda _z, t=tab: self._sync_if_current(t))
         tab.view.textRequested.connect(lambda pno, rect, t=tab: self._on_text_requested(t, pno, rect))
+        tab.view.editBlockRequested.connect(lambda pno, rect, t=tab: self._on_text_requested(t, pno, rect))
+        tab.view.signatureRequested.connect(lambda pno, pt, t=tab: self._on_signature_requested(t, pno, pt))
         tab.view.redactRequested.connect(lambda pno, rect, t=tab: self._on_redact_requested(t, pno, rect))
         tab.view.imageRequested.connect(lambda pno, rect, t=tab: self._on_image_requested(t, pno, rect))
         tab.view.linkRequested.connect(lambda pno, rect, t=tab: self._on_link_requested(t, pno, rect))
@@ -465,7 +474,7 @@ class MainWindow(QMainWindow):
         tab.edited.connect(lambda t=tab: self._on_edited(t))
         tab.thumbs.addAction(self.a_delete)
         tab.thumbs.setContextMenuPolicy(Qt.CustomContextMenu)
-        tab.thumbs.customContextMenuRequested.connect(lambda pos, t=tab: self._thumb_menu(t, pos))
+        tab.thumbs.customContextMenuRequested.connect(lambda pos, t=tab: t._on_thumb_context_menu(pos))
         tab.openPdfAttachmentRequested.connect(self._open_attached_pdf)
         idx = self.tabs.addTab(tab, tab.title)
         self.tabs.setTabToolTip(idx, path)
@@ -710,6 +719,66 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if tab:
             tab.view.set_tool(tool)
+        action_map = {
+            TOOL_PAN: self.a_tool_pan,
+            TOOL_SELECT: self.a_tool_select,
+            TOOL_TEXT: self.a_tool_text,
+            TOOL_REDACT: self.a_tool_redact,
+            TOOL_IMAGE: self.a_tool_image,
+            TOOL_SIGN: self.a_tool_sign,
+            TOOL_LINK: self.a_tool_link,
+            TOOL_PEN: self.a_tool_pen,
+            TOOL_HIGHLIGHT: self.a_tool_highlight,
+            TOOL_UNDERLINE: self.a_tool_underline,
+            TOOL_STRIKEOUT: self.a_tool_strikeout,
+            TOOL_NOTE: self.a_tool_note,
+        }
+        act = action_map.get(tool)
+        if act and not act.isChecked():
+            act.setChecked(True)
+
+    def _activate_sign_tool(self):
+        sig_path = get_signature_path()
+        if not os.path.isfile(sig_path):
+            dlg = SignatureDialog(self)
+            if dlg.exec() != QDialog.Accepted:
+                self._set_active_tool(TOOL_PAN)
+                return
+        self._set_active_tool(TOOL_SIGN)
+        self.status_msg.setText("🖋️ Herramienta Firma activa: Haz clic sobre la página donde desees estampar tu firma.")
+
+    def configure_signature(self):
+        dlg = SignatureDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            self.status_msg.setText("Firma personal guardada correctamente.")
+
+    def _on_signature_requested(self, tab: DocTab, pno: int, pt: fitz.Point):
+        sig_path = get_signature_path()
+        if not os.path.isfile(sig_path):
+            dlg = SignatureDialog(self)
+            if dlg.exec() != QDialog.Accepted:
+                self._set_active_tool(TOOL_PAN)
+                return
+
+        try:
+            with fitz.open(sig_path) as sig_doc:
+                p0 = sig_doc[0]
+                img_w, img_h = p0.rect.width, p0.rect.height
+        except Exception:
+            img_w, img_h = 200.0, 80.0
+
+        target_w = 140.0
+        target_h = max(30.0, target_w * (img_h / max(1.0, img_w)))
+        rect = fitz.Rect(pt.x - target_w * 0.5, pt.y - target_h * 0.5, pt.x + target_w * 0.5, pt.y + target_h * 0.5)
+
+        self._edit(
+            tab,
+            lambda d: cops.insert_image(d, pno, rect, sig_path),
+            f"Firma estampada en página {pno + 1}",
+            goto=pno,
+        )
+        self._set_active_tool(TOOL_PAN)
+        self.status_msg.setText(f"Firma estampada con éxito en página {pno + 1}.")
 
     def _on_text_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
         # 1. Buscar si se hizo clic o seleccionó un bloque/tarjeta de texto existente
