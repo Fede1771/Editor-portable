@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 
 import pymupdf as fitz

@@ -1,26 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
-import os
 from PyInstaller.utils.hooks import collect_all
 
-ROOT_DIR = SPECPATH
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-MAIN_PY = os.path.join(ROOT_DIR, "main.py")
-SPLASH_PNG = os.path.join(DATA_DIR, "splash.png")
-ICON_ICO = os.path.join(DATA_DIR, "app_icon.ico")
-
-datas = [(DATA_DIR, "data")]
+datas = [('C:/Users/feder/Documents/Codigos varios y emprendimientos/Editor portable/data', 'data')]
 binaries = []
 hiddenimports = []
+tmp_ret = collect_all('fitz')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('pymupdf')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('pdf2docx')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('openpyxl')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-for pkg in ("fitz", "pymupdf", "pdf2docx", "openpyxl"):
-    tmp_ret = collect_all(pkg)
-    datas += tmp_ret[0]
-    binaries += tmp_ret[1]
-    hiddenimports += tmp_ret[2]
 
 a = Analysis(
-    [MAIN_PY],
-    pathex=[ROOT_DIR],
+    ['C:/Users/feder/Documents/Codigos varios y emprendimientos/Editor portable/main.py'],
+    pathex=[],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -33,7 +29,7 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 splash = Splash(
-    SPLASH_PNG,
+    'C:/Users/feder/Documents/Codigos varios y emprendimientos/Editor portable/data/splash.png',
     binaries=a.binaries,
     datas=a.datas,
     text_pos=None,
@@ -48,7 +44,7 @@ exe = EXE(
     splash,
     [],
     exclude_binaries=True,
-    name="EditorPDFPortable",
+    name='EditorPDFPortable',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -59,7 +55,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=[ICON_ICO],
+    icon=['C:/Users/feder/Documents/Codigos varios y emprendimientos/Editor portable/data/app_icon.ico'],
 )
 coll = COLLECT(
     exe,
@@ -69,5 +65,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="EditorPDFPortable",
+    name='EditorPDFPortable',
 )
