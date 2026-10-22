@@ -66,7 +66,32 @@ def main():
     assert "Texto original para editar" not in text_after, "Texto original no fue tapado limpiamente"
     doc.save(str(out_dir / "editado.pdf"))
     doc.close()
-    print("  -> Edicion in situ OK")
+
+    # Prueba de regresión: edición en página con lienzo/dibujo de fondo completo (no debe borrar el resto de párrafos)
+    reg_doc = fitz.open()
+    reg_page = reg_doc.new_page(width=595, height=842)
+    bg_shape = reg_page.new_shape()
+    bg_shape.draw_rect(reg_page.rect)
+    bg_shape.finish(color=(1, 1, 1), fill=(1, 1, 1))
+    bg_shape.commit()
+    reg_page.insert_textbox(fitz.Rect(50, 50, 500, 100), "Título principal intocable", fontsize=18)
+    reg_page.insert_textbox(fitz.Rect(50, 130, 500, 200), "Párrafo original que será editado", fontsize=12)
+    reg_page.insert_textbox(fitz.Rect(50, 230, 500, 300), "Párrafo secundario que DEBE permanecer", fontsize=12)
+    
+    reg_block = content_ops.find_text_block_at(reg_page, fitz.Point(60, 140))
+    assert reg_block is not None
+    assert reg_block.get("card_border") is None, "El fondo de página no debe confundirse con una tarjeta/recuadro"
+    content_ops.replace_text_block(
+        reg_doc, 0, reg_block["bbox"], "Párrafo editado limpiamente",
+        fontsize=reg_block["fontsize"], card_border=reg_block.get("card_border")
+    )
+    reg_text = reg_doc[0].get_text()
+    assert "Título principal intocable" in reg_text, "El título principal fue erróneamente borrado"
+    assert "Párrafo secundario que DEBE permanecer" in reg_text, "El párrafo secundario fue erróneamente borrado"
+    assert "Párrafo editado limpiamente" in reg_text, "El párrafo editado no fue insertado correctamente"
+    reg_doc.close()
+
+    print("  -> Edicion in situ OK (incluye prevención de borrado accidental por fondos)")
 
     # 4. OCR
     print("[4/6] Probando OCR integrado...")

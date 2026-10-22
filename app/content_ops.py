@@ -434,14 +434,33 @@ def find_text_block_at(
 
 
 def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
-    """Detecta si el texto está contenido dentro de un recuadro o tarjeta (vectorial o escaneado)."""
+    """Detecta si el texto está contenido dentro de un recuadro o tarjeta pequeña (vectorial o escaneado).
+    Descarta fondos de página completos, márgenes o contenedores masivos para evitar borrar contenido adyacente."""
     # 1. Búsqueda en trazados vectoriales (PDFs nativos y diagramas)
+    candidates = []
+    page_area = page.rect.get_area()
+    bbox_area = bbox.get_area()
+
     for d in page.get_drawings():
         r = fitz.Rect(d["rect"])
-        if r.width >= 15.0 and r.height >= 12.0:
-            exp = fitz.Rect(r.x0 - 5.0, r.y0 - 5.0, r.x1 + 5.0, r.y1 + 5.0)
-            if exp.contains(bbox.tl) and exp.contains(bbox.br):
-                return r
+        if r.width < 15.0 or r.height < 12.0:
+            continue
+        # Descartar estrictamente dibujos de fondo de página, márgenes o lienzos grandes
+        if r.width >= page.rect.width * 0.70 or r.height >= page.rect.height * 0.50:
+            continue
+        if r.get_area() >= page_area * 0.25:
+            continue
+        # Debe envolver estrechamente el bloque de texto (no una sección masiva o columna)
+        if r.width > bbox.width + 50.0 or r.height > bbox.height + 50.0:
+            continue
+        if r.get_area() > max(bbox_area * 2.5, bbox_area + 2500):
+            continue
+        exp = fitz.Rect(r.x0 - 4.0, r.y0 - 4.0, r.x1 + 4.0, r.y1 + 4.0)
+        if exp.contains(bbox.tl) and exp.contains(bbox.br):
+            candidates.append(r)
+
+    if candidates:
+        return min(candidates, key=lambda c: c.get_area())
 
     # 2. Análisis de píxeles para PDFs escaneados o procesados con OCR
     try:
@@ -523,14 +542,25 @@ def replace_text_block(
     align: int = fitz.TEXT_ALIGN_LEFT,
     card_border: fitz.Rect | None = None,
 ) -> None:
-    """Borra limpiamente el bloque existente preservando íntegramente el recuadro y formato exterior."""
+    """Borra limpiamente el bloque de texto existente preservando intacto el resto de la página."""
     page = doc[page_idx]
+
+    # Validación de seguridad: verificar que si se pasa card_border, sea un recuadro pequeño y no el fondo de la página
+    if card_border is not None:
+        if (
+            card_border.width >= page.rect.width * 0.70
+            or card_border.height >= page.rect.height * 0.50
+            or card_border.get_area() >= page.rect.get_area() * 0.25
+            or card_border.get_area() > max(bbox.get_area() * 2.5, bbox.get_area() + 2500)
+        ):
+            card_border = None
 
     if card_border is None:
         card_border = detect_card_border(page, bbox)
 
     if card_border is not None:
-        # La redacción se realiza ESTRICTAMENTE en el interior de la tarjeta sin tocar ni borrar el contorno
+        # Texto dentro de una pequeña tarjeta o botón acotado:
+        # Redactar el interior sin tocar el contorno exterior
         redact_rect = fitz.Rect(
             card_border.x0 + 1.2,
             card_border.y0 + 1.2,
@@ -544,26 +574,39 @@ def replace_text_block(
             card_border.y1 - 2.0,
         )
     else:
-        # Texto libre sin recuadro: acotar la redacción al espacio exacto del texto
+        # Texto libre en la página:
+        # La redacción debe cubrir ESTRICTAMENTE el área del texto original a reemplazar,
+        # con un margen de 1 punto para cubrir astas de letras, SIN tocar texto o imágenes adyacentes.
+        redact_rect = fitz.Rect(
+            max(0.0, bbox.x0 - 1.0),
+            max(0.0, bbox.y0 - 1.0),
+            min(page.rect.width, bbox.x1 + 1.0),
+            min(page.rect.height, bbox.y1 + 1.5),
+        )
+
+        lines = new_text.splitlines() or [""]
         needed_w = max(
-            (fitz.get_text_length(line, fontname=fontname, fontsize=fontsize) for line in new_text.splitlines()),
+            (fitz.get_text_length(line, fontname=fontname, fontsize=fontsize) for line in lines),
             default=0.0
         )
         actual_w = max(bbox.width, needed_w + 4.0)
-        actual_w = min(actual_w, page.rect.width - bbox.x0 - 8)
-        # La zona de redacción debe cubrir tanto el bbox original como la expansión del nuevo texto
-        redact_rect = fitz.Rect(bbox.x0, bbox.y0, max(bbox.x1, bbox.x0 + actual_w), bbox.y1 + 1.0)
-        target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y1 + 2.0)
+        actual_w = min(actual_w, page.rect.width - bbox.x0 - 8.0)
 
-    # Eliminar cualquier campo interactivo (widget/AcroForm) o anotación que coincida con la zona
+        line_h = fontsize * 1.3
+        needed_h = max(bbox.height, len(lines) * line_h + 4.0)
+        actual_h = min(needed_h, page.rect.height - bbox.y0 - 8.0)
+
+        target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y0 + actual_h)
+
+    # Eliminar cualquier campo interactivo (widget/AcroForm) o anotación que coincida con la zona de redacción
     for w in list(page.widgets()):
-        if w.rect.intersects(redact_rect) or w.rect.intersects(target_rect):
+        if w.rect.intersects(redact_rect):
             page.delete_widget(w)
     for a in list(page.annots()):
-        if a.rect.intersects(redact_rect) or a.rect.intersects(target_rect):
+        if a.rect.intersects(redact_rect):
             page.delete_annot(a)
 
-    # Redactar texto evitando en todo momento eliminar trazados vectoriales o líneas
+    # Redactar texto existente (evitando eliminar trazados vectoriales)
     page.add_redact_annot(redact_rect, fill=fill_color)
     page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_NONE)
 
@@ -577,7 +620,7 @@ def replace_text_block(
             shape.commit()
         return
 
-    # Inserción de texto con autofit acotado dentro del recuadro
+    # Inserción del nuevo texto
     if autofit:
         curr_fs = fontsize
         if curr_fs > 12.0 and target_rect.height < 45.0:
@@ -593,9 +636,16 @@ def replace_text_block(
             )
             if rc >= 0:
                 break
-            page.add_redact_annot(redact_rect, fill=fill_color)
-            page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_NONE)
             curr_fs -= 0.5
+        else:
+            page.insert_textbox(
+                target_rect,
+                new_text,
+                fontsize=4.5,
+                fontname=fontname,
+                color=color,
+                align=align,
+            )
     else:
         page.insert_textbox(
             target_rect,
@@ -606,7 +656,7 @@ def replace_text_block(
             align=align,
         )
 
-    # Si había una tarjeta / recuadro, redibujar el contorno para garantizar máxima nitidez y que nunca se pierda
+    # Si había una tarjeta / recuadro, redibujar el contorno para garantizar máxima nitidez
     if card_border is not None:
         shape = page.new_shape()
         shape.draw_rect(card_border)
