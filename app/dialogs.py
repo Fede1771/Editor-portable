@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
@@ -290,7 +290,8 @@ class CombineDialog(_BaseDialog):
 
     def _add(self):
         from . import creation
-        paths, _ = QFileDialog.getOpenFileNames(self, "Agregar archivos", "", creation.file_filter())
+        docs = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation) or os.path.expanduser("~")
+        paths, _ = QFileDialog.getOpenFileNames(self, "Agregar archivos", docs, creation.file_filter())
         for p in paths:
             self._append(p)
 

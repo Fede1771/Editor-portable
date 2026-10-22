@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 import pymupdf as fitz
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
@@ -455,13 +455,28 @@ class MainWindow(QMainWindow):
         if tab is not None:
             getattr(tab, method)()
 
+    def _default_open_dir(self) -> str:
+        if hasattr(self, "_last_open_dir") and self._last_open_dir and os.path.isdir(self._last_open_dir):
+            return self._last_open_dir
+        # Usar Documentos del usuario de Windows o Carpeta personal
+        docs = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        if docs and os.path.isdir(docs):
+            return docs
+        home = os.path.expanduser("~")
+        if home and os.path.isdir(home):
+            return home
+        return ""
+
     def open_dialog(self):
+        init_dir = self._default_open_dir()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Abrir PDF", "", f"{PDF_FILTER};;Todos los archivos (*)")
+            self, "Abrir PDF", init_dir, f"{PDF_FILTER};;Todos los archivos (*)")
         for p in paths:
             self.open_file(p)
 
     def open_file(self, path: str):
+        if os.path.exists(path):
+            self._last_open_dir = os.path.dirname(os.path.abspath(path))
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, DocTab) and w.path == path:
@@ -852,10 +867,11 @@ class MainWindow(QMainWindow):
         )
 
     def _on_image_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
+        init_dir = os.path.dirname(tab.path) if tab and tab.path else self._default_open_dir()
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Seleccionar imagen a insertar",
-            "",
+            init_dir,
             "Imágenes (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff);;Todos los archivos (*)",
         )
         if not path:
@@ -1247,7 +1263,8 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- crear PDF
     def create_from_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "Crear PDF desde archivos", "", creation.file_filter())
+        init_dir = self._default_open_dir()
+        paths, _ = QFileDialog.getOpenFileNames(self, "Crear PDF desde archivos", init_dir, creation.file_filter())
         if paths:
             self._create_from_dialog(paths)
 
@@ -1343,7 +1360,8 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Insertar páginas desde…", "", f"{PDF_FILTER};;Todos los archivos (*)")
+        init_dir = os.path.dirname(tab.path) if tab.path else self._default_open_dir()
+        path, _ = QFileDialog.getOpenFileName(self, "Insertar páginas desde…", init_dir, f"{PDF_FILTER};;Todos los archivos (*)")
         if not path:
             return
         sel = tab.selected_pages()
@@ -1374,7 +1392,8 @@ class MainWindow(QMainWindow):
         if not tab:
             return
         sel = tab.selected_pages()
-        path, _ = QFileDialog.getOpenFileName(self, "Reemplazar con páginas de…", "", PDF_FILTER)
+        init_dir = os.path.dirname(tab.path) if tab.path else self._default_open_dir()
+        path, _ = QFileDialog.getOpenFileName(self, "Reemplazar con páginas de…", init_dir, PDF_FILTER)
         if not path:
             return
         first, ok = QInputDialog.getInt(
