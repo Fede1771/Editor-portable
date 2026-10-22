@@ -362,10 +362,8 @@ def find_text_block_at(
     if is_ocr or is_corrupt_size:
         font_size = max(5.0, visual_fs)
     else:
-        if 0.5 <= (raw_fs / avg_line_height) <= 1.3:
-            font_size = round(raw_fs, 1)
-        else:
-            font_size = max(5.0, visual_fs)
+        # En PDFs nativos, raw_fs es el tamaño de fuente exacto y real del documento
+        font_size = round(raw_fs, 1)
 
     # 3. Detección automática de tipografía, negrita y cursiva
     flags = s0.get("flags", 0)
@@ -589,12 +587,12 @@ def replace_text_block(
             (fitz.get_text_length(line, fontname=fontname, fontsize=fontsize) for line in lines),
             default=0.0
         )
-        actual_w = max(bbox.width, needed_w + 4.0)
-        actual_w = min(actual_w, page.rect.width - bbox.x0 - 8.0)
+        actual_w = max(bbox.width, needed_w + 14.0)
+        actual_w = min(actual_w, page.rect.width - bbox.x0 - 6.0)
 
-        line_h = fontsize * 1.3
-        needed_h = max(bbox.height, len(lines) * line_h + 4.0)
-        actual_h = min(needed_h, page.rect.height - bbox.y0 - 8.0)
+        line_h = fontsize * 1.35
+        needed_h = max(bbox.height, len(lines) * line_h + 6.0)
+        actual_h = min(needed_h, page.rect.height - bbox.y0 - 6.0)
 
         target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y0 + actual_h)
 
@@ -620,11 +618,9 @@ def replace_text_block(
             shape.commit()
         return
 
-    # Inserción del nuevo texto
+    # Inserción del nuevo texto respetando exactamente el tamaño de fuente elegido
     if autofit:
         curr_fs = fontsize
-        if curr_fs > 12.0 and target_rect.height < 45.0:
-            curr_fs = min(curr_fs, 11.0)
         while curr_fs >= 4.5:
             rc = page.insert_textbox(
                 target_rect,

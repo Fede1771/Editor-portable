@@ -91,7 +91,22 @@ def main():
     assert "Párrafo editado limpiamente" in reg_text, "El párrafo editado no fue insertado correctamente"
     reg_doc.close()
 
-    print("  -> Edicion in situ OK (incluye prevención de borrado accidental por fondos)")
+    # Prueba de regresión: edición de encabezado/título preservando exactamente el tamaño de fuente original
+    head_doc = fitz.open()
+    head_page = head_doc.new_page(width=595, height=842)
+    head_page.insert_textbox(fitz.Rect(54, 100, 500, 130), "Filmina 9: La Elegancia de la Delegación (C#)", fontsize=14, fontname="hebo")
+    head_block = content_ops.find_text_block_at(head_page, fitz.Point(60, 115))
+    assert head_block is not None
+    assert head_block["fontsize"] == 14.0, f"Se esperaba tamaño 14.0, se obtuvo {head_block['fontsize']}"
+    content_ops.replace_text_block(
+        head_doc, 0, head_block["bbox"], "Filmina 9: La Elegancia de la Delegación (C#)adasd",
+        fontsize=head_block["fontsize"], fontname=head_block["fontname"], card_border=head_block.get("card_border")
+    )
+    new_span = head_doc[0].get_text("dict")["blocks"][0]["lines"][0]["spans"][0]
+    assert new_span["size"] == 14.0, f"El tamaño cambió indebidamente a {new_span['size']} en lugar de 14.0"
+    head_doc.close()
+
+    print("  -> Edicion in situ OK (incluye prevención de borrado por fondos y preservación exacta de tipografía/tamaño)")
 
     # 4. OCR
     print("[4/6] Probando OCR integrado...")
