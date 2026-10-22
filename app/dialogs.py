@@ -619,33 +619,14 @@ class CompressPdfDialog(_BaseDialog):
         super().__init__("Comprimir y reducir tamaño de PDF", parent)
         self.setMinimumWidth(520)
 
-        # Encabezado informativo con tamaño original
+        # Indicador de tamaño actual adaptativo
         if current_size_bytes > 0:
             if current_size_bytes >= 1024 * 1024:
                 size_str = f"{current_size_bytes / (1024 * 1024):.2f} MB"
             else:
                 size_str = f"{current_size_bytes / 1024:.1f} KB"
-        else:
-            size_str = "Desconocido"
-
-        info_box = QFrame()
-        info_box.setStyleSheet("""
-            QFrame {
-                background-color: #f8f9fa;
-                border: 1px solid #dadce0;
-                border-radius: 6px;
-                padding: 10px;
-            }
-        """)
-        info_lay = QVBoxLayout(info_box)
-        info_lay.setContentsMargins(10, 8, 10, 8)
-        info_lay.setSpacing(4)
-        doc_name = current_doc_title or "Documento actual"
-        lbl_doc = QLabel(f"<b>Documento:</b> {doc_name}")
-        lbl_size = QLabel(f"<b>Tamaño en disco:</b> <span style='color: #1a73e8; font-weight: bold;'>{size_str}</span>")
-        info_lay.addWidget(lbl_doc)
-        info_lay.addWidget(lbl_size)
-        self.form.addRow(info_box)
+            lbl_size = QLabel(f"Tamaño actual del documento: <b>{size_str}</b>")
+            self.form.addRow(lbl_size)
 
         # Grupo de perfiles específicos de pólizas y siniestros
         grp_profiles = QGroupBox("Perfiles de compresión")
@@ -655,22 +636,22 @@ class CompressPdfDialog(_BaseDialog):
         self.btn_group = QButtonGroup(self)
 
         self.rb_standard = QRadioButton("📂 Archivo Digital Corporativo (Recomendado)")
-        self.rb_standard.setStyleSheet("font-weight: bold; color: #202124;")
+        self.rb_standard.setStyleSheet("font-weight: bold;")
         self.lbl_standard_desc = QLabel("   Equilibrio óptimo para repositorios y gestión de siniestros (180 DPI · Calidad 80%).")
-        self.lbl_standard_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+        self.lbl_standard_desc.setStyleSheet("font-size: 8.5pt;")
 
         self.rb_email = QRadioButton("📧 Envío por Correo / Póliza Ligera (< 5 MB)")
-        self.rb_email.setStyleSheet("font-weight: bold; color: #202124;")
+        self.rb_email.setStyleSheet("font-weight: bold;")
         self.lbl_email_desc = QLabel("   Compresión alta para enviar pólizas o certificados por email sin rebotar (130 DPI · Calidad 65%).")
-        self.lbl_email_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+        self.lbl_email_desc.setStyleSheet("font-size: 8.5pt;")
 
         self.rb_high = QRadioButton("⚖️ Legajo Pericial / Siniestros (Máxima Nitidez)")
-        self.rb_high.setStyleSheet("font-weight: bold; color: #202124;")
+        self.rb_high.setStyleSheet("font-weight: bold;")
         self.lbl_high_desc = QLabel("   Preserva al máximo detalles de fotos de daños periciales y firmas (300 DPI · Calidad 92%).")
-        self.lbl_high_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+        self.lbl_high_desc.setStyleSheet("font-size: 8.5pt;")
 
         self.rb_custom = QRadioButton("🛠️ Personalizado")
-        self.rb_custom.setStyleSheet("font-weight: bold; color: #202124;")
+        self.rb_custom.setStyleSheet("font-weight: bold;")
 
         self.btn_group.addButton(self.rb_standard, 1)
         self.btn_group.addButton(self.rb_email, 2)
