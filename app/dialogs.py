@@ -8,7 +8,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QPushButton, QRadioButton, QSlider, QSpinBox,
     QTextEdit, QVBoxLayout, QWidget,
 )
@@ -612,41 +612,169 @@ class ConvertImagesDialog(_BaseDialog):
         return True
 
 
-class OptimizeDialog(_BaseDialog):
-    """Diálogo para configurar la reducción de peso del PDF."""
+class CompressPdfDialog(_BaseDialog):
+    """Diálogo limpio y moderno de compresión con perfiles específicos para aseguradoras."""
 
-    def __init__(self, parent=None):
-        super().__init__("Optimizar y reducir tamaño del PDF", parent)
-        self.chk_images = QCheckBox("Comprimir y optimizar imágenes incrustadas")
-        self.chk_images.setChecked(True)
+    def __init__(self, current_doc_title: str = "", current_size_bytes: int = 0, parent=None):
+        super().__init__("Comprimir y reducir tamaño de PDF", parent)
+        self.setMinimumWidth(520)
 
-        self.quality_slider = QSlider(Qt.Horizontal)
-        self.quality_slider.setRange(40, 95)
-        self.quality_slider.setValue(75)
-        self.quality_lbl = QLabel("75% (Equilibrado)")
-        self.quality_slider.valueChanged.connect(
-            lambda v: self.quality_lbl.setText(f"{v}%")
-        )
+        # Encabezado informativo con tamaño original
+        if current_size_bytes > 0:
+            if current_size_bytes >= 1024 * 1024:
+                size_str = f"{current_size_bytes / (1024 * 1024):.2f} MB"
+            else:
+                size_str = f"{current_size_bytes / 1024:.1f} KB"
+        else:
+            size_str = "Desconocido"
+
+        info_box = QFrame()
+        info_box.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dadce0;
+                border-radius: 6px;
+                padding: 10px;
+            }
+        """)
+        info_lay = QVBoxLayout(info_box)
+        info_lay.setContentsMargins(10, 8, 10, 8)
+        info_lay.setSpacing(4)
+        doc_name = current_doc_title or "Documento actual"
+        lbl_doc = QLabel(f"<b>Documento:</b> {doc_name}")
+        lbl_size = QLabel(f"<b>Tamaño en disco:</b> <span style='color: #1a73e8; font-weight: bold;'>{size_str}</span>")
+        info_lay.addWidget(lbl_doc)
+        info_lay.addWidget(lbl_size)
+        self.form.addRow(info_box)
+
+        # Grupo de perfiles específicos de pólizas y siniestros
+        grp_profiles = QGroupBox("Perfiles de compresión")
+        grp_lay = QVBoxLayout(grp_profiles)
+        grp_lay.setSpacing(8)
+
+        self.btn_group = QButtonGroup(self)
+
+        self.rb_standard = QRadioButton("📂 Archivo Digital Corporativo (Recomendado)")
+        self.rb_standard.setStyleSheet("font-weight: bold; color: #202124;")
+        self.lbl_standard_desc = QLabel("   Equilibrio óptimo para repositorios y gestión de siniestros (180 DPI · Calidad 80%).")
+        self.lbl_standard_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+
+        self.rb_email = QRadioButton("📧 Envío por Correo / Póliza Ligera (< 5 MB)")
+        self.rb_email.setStyleSheet("font-weight: bold; color: #202124;")
+        self.lbl_email_desc = QLabel("   Compresión alta para enviar pólizas o certificados por email sin rebotar (130 DPI · Calidad 65%).")
+        self.lbl_email_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+
+        self.rb_high = QRadioButton("⚖️ Legajo Pericial / Siniestros (Máxima Nitidez)")
+        self.rb_high.setStyleSheet("font-weight: bold; color: #202124;")
+        self.lbl_high_desc = QLabel("   Preserva al máximo detalles de fotos de daños periciales y firmas (300 DPI · Calidad 92%).")
+        self.lbl_high_desc.setStyleSheet("color: #5f6368; font-size: 8.5pt;")
+
+        self.rb_custom = QRadioButton("🛠️ Personalizado")
+        self.rb_custom.setStyleSheet("font-weight: bold; color: #202124;")
+
+        self.btn_group.addButton(self.rb_standard, 1)
+        self.btn_group.addButton(self.rb_email, 2)
+        self.btn_group.addButton(self.rb_high, 3)
+        self.btn_group.addButton(self.rb_custom, 4)
+
+        grp_lay.addWidget(self.rb_standard)
+        grp_lay.addWidget(self.lbl_standard_desc)
+        grp_lay.addWidget(self.rb_email)
+        grp_lay.addWidget(self.lbl_email_desc)
+        grp_lay.addWidget(self.rb_high)
+        grp_lay.addWidget(self.lbl_high_desc)
+        grp_lay.addWidget(self.rb_custom)
+
+        self.rb_standard.setChecked(True)
+        self.form.addRow(grp_profiles)
+
+        # Panel de ajustes personalizados (se muestra si rb_custom está seleccionado)
+        self.custom_box = QWidget()
+        custom_lay = QFormLayout(self.custom_box)
+        custom_lay.setContentsMargins(15, 0, 15, 0)
+
+        self.custom_quality = QSlider(Qt.Horizontal)
+        self.custom_quality.setRange(40, 95)
+        self.custom_quality.setValue(80)
+        self.custom_q_lbl = QLabel("80%")
+        self.custom_quality.valueChanged.connect(lambda v: self.custom_q_lbl.setText(f"{v}%"))
         row_q = QHBoxLayout()
-        row_q.addWidget(self.quality_slider)
-        row_q.addWidget(self.quality_lbl)
+        row_q.addWidget(self.custom_quality)
+        row_q.addWidget(self.custom_q_lbl)
+        custom_lay.addRow("Calidad JPEG:", row_q)
 
-        self.chk_sanitize = QCheckBox("Eliminar metadatos ocultos (información confidencial del autor)")
-        self.chk_sanitize.setChecked(False)
+        self.custom_dpi = QComboBox()
+        self.custom_dpi.addItem("96 DPI (Web ultra ligero)", 96)
+        self.custom_dpi.addItem("130 DPI (Email / Pólizas)", 130)
+        self.custom_dpi.addItem("150 DPI (Estándar oficina)", 150)
+        self.custom_dpi.addItem("180 DPI (Archivo equilibrado)", 180)
+        self.custom_dpi.addItem("200 DPI (Alta resolución)", 200)
+        self.custom_dpi.addItem("300 DPI (Calidad pericial / Impresión)", 300)
+        self.custom_dpi.setCurrentIndex(3)
+        custom_lay.addRow("Resolución máx. imágenes:", self.custom_dpi)
 
-        self.form.addRow("", self.chk_images)
-        self.form.addRow("Calidad de imagen:", row_q)
+        self.custom_box.setVisible(False)
+        self.rb_custom.toggled.connect(self.custom_box.setVisible)
+        self.form.addRow(self.custom_box)
+
+        # Opciones adicionales de privacidad
+        self.chk_sanitize = QCheckBox("🛡️ Eliminar metadatos confidenciales (autor, fecha y software de creación)")
+        self.chk_sanitize.setChecked(True)
         self.form.addRow("", self.chk_sanitize)
+
         self.finish()
 
+    def get_settings(self) -> dict:
+        if self.rb_email.isChecked():
+            return {
+                "profile": "email",
+                "compress_images": True,
+                "quality": 65,
+                "max_dpi": 130,
+                "sanitize": self.chk_sanitize.isChecked(),
+                "max_dim": 1300,
+            }
+        elif self.rb_high.isChecked():
+            return {
+                "profile": "high",
+                "compress_images": True,
+                "quality": 92,
+                "max_dpi": 300,
+                "sanitize": self.chk_sanitize.isChecked(),
+                "max_dim": 3000,
+            }
+        elif self.rb_custom.isChecked():
+            dpi = self.custom_dpi.currentData()
+            return {
+                "profile": "custom",
+                "compress_images": True,
+                "quality": self.custom_quality.value(),
+                "max_dpi": dpi,
+                "sanitize": self.chk_sanitize.isChecked(),
+                "max_dim": int(dpi * 10),
+            }
+        else:
+            return {
+                "profile": "standard",
+                "compress_images": True,
+                "quality": 80,
+                "max_dpi": 180,
+                "sanitize": self.chk_sanitize.isChecked(),
+                "max_dim": 1800,
+            }
+
+    # Compatibilidad con métodos anteriores
     def compress_images(self) -> bool:
-        return self.chk_images.isChecked()
+        return True
 
     def image_quality(self) -> int:
-        return self.quality_slider.value()
+        return self.get_settings()["quality"]
 
     def sanitize(self) -> bool:
         return self.chk_sanitize.isChecked()
+
+
+OptimizeDialog = CompressPdfDialog
 
 
 class AddNoteDialog(_BaseDialog):

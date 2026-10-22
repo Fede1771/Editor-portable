@@ -24,6 +24,9 @@ MAX_RECENT_FILES = 8
 
 
 def get_recent_files() -> list[str]:
+    from .privacy import is_private_mode
+    if is_private_mode():
+        return []
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
     val = settings.value(KEY_RECENT_FILES, [])
     if isinstance(val, str):
@@ -34,6 +37,9 @@ def get_recent_files() -> list[str]:
 
 
 def add_recent_file(file_path: str) -> None:
+    from .privacy import is_private_mode
+    if is_private_mode():
+        return
     if not file_path or not os.path.exists(file_path):
         return
     file_path = os.path.abspath(file_path)

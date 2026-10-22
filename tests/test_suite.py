@@ -314,11 +314,60 @@ def main():
     test_doc.close()
     print("  -> Selección inteligente predeterminada y Pre-fetch OK")
 
+    # 13. Privacidad Cero Huella y Compresión Inteligente
+    print("[13/13] Probando Cero Huella (TempManager) y perfiles de Compresión...")
+    from app.privacy import TempManager, is_private_mode, set_private_mode
+    from app.optimizer import optimize_document, PROFILES, PROFILE_EMAIL
+    from app.dialogs import CompressPdfDialog
+
+    # Prueba TempManager: creación segura y destrucción con zero-wipe
+    tmp_path = TempManager.create_temp_file(prefix="test_wipe_", suffix=".dat", content=b"SECRET_DATA_12345")
+    assert os.path.exists(tmp_path), "Archivo temporal debió existir"
+    TempManager.cleanup_path(tmp_path)
+    assert not os.path.exists(tmp_path), "Archivo temporal debió destruirse con zero-wipe"
+
+    # Prueba Modo Privado (Cero Persistencia)
+    assert is_private_mode() is False
+    set_private_mode(True)
+    assert is_private_mode() is True
+    set_private_mode(False)
+    assert is_private_mode() is False
+
+    # Prueba Compresión con perfil de Póliza / Email
+    comp_in = fitz.open(str(pdf_path))
+    comp_in.set_metadata({"author": "Perito Aseguradora", "title": "Siniestro 9988"})
+    comp_out_path = str(out_dir / "comprimido_email.pdf")
+    cfg = PROFILES[PROFILE_EMAIL]
+    i_sz, f_sz, saving = optimize_document(
+        comp_in,
+        comp_out_path,
+        compress_images=True,
+        image_quality=cfg["quality"],
+        max_dpi=cfg["max_dpi"],
+        sanitize_metadata=cfg["sanitize"],
+        max_dim=cfg["max_dim"],
+    )
+    comp_in.close()
+    assert os.path.exists(comp_out_path), "El PDF comprimido debió generarse"
+    comp_res = fitz.open(comp_out_path)
+    assert comp_res.metadata.get("author") in (None, ""), "Metadatos debieron sanitizarse con perfil email"
+    comp_res.close()
+
+    # Prueba Diálogo de compresión y lectura de perfiles
+    dlg_comp = CompressPdfDialog(current_doc_title="test.pdf", current_size_bytes=50000)
+    settings = dlg_comp.get_settings()
+    assert "quality" in settings and "max_dpi" in settings and "sanitize" in settings
+    del dlg_comp
+    del view
+    app.processEvents()
+    print("  -> Cero Huella (TempManager) y Compresión Inteligente OK")
+
     # Limpieza de temporales de prueba
     import shutil
     shutil.rmtree(out_dir, ignore_errors=True)
 
     print("\nTODAS LAS PRUEBAS COMPLETADAS CON EXITO.")
+    os._exit(0)
 
 if __name__ == "__main__":
     main()

@@ -246,7 +246,8 @@ class _DocSnapshot:
         self._size = len(data)
         self._temp_path: str | None = None
         if self._size >= self.DISK_THRESHOLD:
-            fd, path = tempfile.mkstemp(prefix="editorpdf_snap_", suffix=".tmp")
+            from .privacy import TempManager
+            fd, path = TempManager.create_temp_file(prefix="editorpdf_snap_", suffix=".tmp")
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             self._temp_path = path
@@ -265,8 +266,8 @@ class _DocSnapshot:
     def cleanup(self) -> None:
         if self._temp_path:
             try:
-                if os.path.isfile(self._temp_path):
-                    os.remove(self._temp_path)
+                from .privacy import TempManager
+                TempManager.cleanup_path(self._temp_path)
             except Exception:
                 pass
             self._temp_path = None

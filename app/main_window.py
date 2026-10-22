@@ -26,11 +26,12 @@ from . import annotations as annot_mod
 from . import forms as forms_mod
 from .background import run_blocking
 from .dialogs import (
-    AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, ConvertImagesDialog,
-    CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog, OcrDialog,
-    OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
+    AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, CompressPdfDialog,
+    ConvertImagesDialog, CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog,
+    OcrDialog, OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
 )
 from .doc_tab import DocTab
+from .privacy import TempManager, is_private_mode, set_private_mode
 from .welcome import WelcomeWidget, add_recent_file, get_recent_files, clear_recent_files
 from .viewer import (
     FIT_NONE, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
         self.status_msg = QLabel("Abrí un PDF con Ctrl+O o arrastralo a la ventana")
         self.statusBar().addWidget(self.status_msg, 1)
         self.statusBar().addPermanentWidget(self.status_pages)
+        self._sync_private_mode_ui()
         self._update_controls()
 
     # ---------------------------------------------------------------- acciones
@@ -189,14 +191,19 @@ class MainWindow(QMainWindow):
         self.a_export_text = self._act("Texto plano (.txt)…", self.export_to_text, None, "Exportar todo el texto plano")
         self.a_export_html = self._act("Página web (.html)…", self.export_to_html, None, "Exportar como página HTML")
 
-        # OCR y Optimización (Fases 5 y 10)
+        # OCR, Compresión y Optimización
         self.a_ocr = self._act("Reconocer texto con OCR…", self.run_ocr, None, "Convertir documento escaneado a PDF con texto buscable")
-        self.a_optimize = self._act("Optimizar y reducir tamaño…", self.optimize_document, None, "Comprimir imágenes y reducir el peso del archivo")
+        self.a_compress = self._act("🗜 Comprimir PDF…", self.compress_document, "Ctrl+Shift+C", "Reducir tamaño del PDF con perfiles específicos para pólizas y siniestros")
+        self.a_optimize = self.a_compress
         self.a_attachments = self._act("Archivos adjuntos…", self.show_attachments, "Ctrl+Shift+A", "Ver y gestionar los archivos adjuntos incrustados en el PDF")
+
+        # Privacidad y Cero Huella
+        self.a_private_mode = self._act("🛡️ Sesión Privada", self.toggle_private_mode, None, "Cero persistencia: no guarda historial ni rutas en el registro", checkable=True)
+        self.a_clear_privacy = self._act("🧹 Limpiar historial y temporales…", self.clear_all_traces_now, None, "Destruir de inmediato archivos temporales e historial")
 
         self.utility_actions = [
             self.a_export_word, self.a_export_excel, self.a_export_images,
-            self.a_export_text, self.a_export_html, self.a_ocr, self.a_optimize,
+            self.a_export_text, self.a_export_html, self.a_ocr, self.a_compress,
             self.a_fill_forms, self.a_flatten_forms, self.a_attachments,
         ]
 
@@ -216,41 +223,48 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self):
         tb = QToolBar("Principal")
         tb.setMovable(False)
+        tb.setStyleSheet("""
+            QToolBar {
+                background: #ffffff;
+                border-bottom: 1px solid #e0e4e8;
+                spacing: 4px;
+                padding: 3px 6px;
+            }
+            QToolButton {
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 4px 7px;
+                font-size: 9pt;
+                color: #202124;
+            }
+            QToolButton:hover {
+                background-color: #f1f3f4;
+                border-color: #dadce0;
+            }
+            QToolButton:checked {
+                background-color: #e8f0fe;
+                border-color: #1a73e8;
+                color: #1a73e8;
+                font-weight: 600;
+            }
+            QToolButton:pressed {
+                background-color: #d2e3fc;
+            }
+            QToolBar::separator {
+                width: 1px;
+                background-color: #dadce0;
+                margin: 4px 6px;
+            }
+        """)
         self.addToolBar(tb)
+
+        # Grupo 1: Documento y Compresión
         tb.addAction(self.a_open)
         tb.addAction(self.a_save)
-        tb.addAction(self.a_print)
+        tb.addAction(self.a_compress)
         tb.addSeparator()
-        tb.addAction(self.a_prev)
-        self.page_spin = QSpinBox()
-        self.page_spin.setMinimum(1)
-        self.page_spin.setKeyboardTracking(False)
-        self.page_spin.valueChanged.connect(lambda val: self._view_do("goto_page", val - 1))
-        tb.addWidget(self.page_spin)
-        self.page_total = QLabel(" / 0 ")
-        tb.addWidget(self.page_total)
-        tb.addAction(self.a_next)
-        tb.addSeparator()
-        tb.addAction(self.a_zoom_out)
-        self.zoom_combo = QComboBox()
-        self.zoom_combo.setEditable(True)
-        self.zoom_combo.addItems(ZOOM_PRESETS)
-        self.zoom_combo.setMinimumWidth(80)
-        self.zoom_combo.activated.connect(self._zoom_from_combo)
-        self.zoom_combo.lineEdit().editingFinished.connect(self._zoom_from_combo)
-        tb.addWidget(self.zoom_combo)
-        tb.addAction(self.a_zoom_in)
-        tb.addAction(self.a_fit_w)
-        tb.addSeparator()
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Continuo", MODE_CONTINUOUS)
-        self.mode_combo.addItem("Una página", MODE_SINGLE)
-        self.mode_combo.addItem("Dos páginas", MODE_TWO)
-        self.mode_combo.activated.connect(
-            lambda _i: self._view_do("set_mode", self.mode_combo.currentData())
-        )
-        tb.addWidget(self.mode_combo)
-        tb.addSeparator()
+
+        # Grupo 2: Herramientas principales de edición (destacadas y minimalistas)
         tb.addAction(self.a_tool_select)
         tb.addAction(self.a_tool_text)
         tb.addAction(self.a_tool_redact)
@@ -268,11 +282,47 @@ class MainWindow(QMainWindow):
         tb.addWidget(btn_annot)
 
         tb.addSeparator()
-        tb.addAction(self.a_side)
+
+        # Grupo 3: Navegación y Zoom compactos
+        tb.addAction(self.a_prev)
+        self.page_spin = QSpinBox()
+        self.page_spin.setMinimum(1)
+        self.page_spin.setKeyboardTracking(False)
+        self.page_spin.valueChanged.connect(lambda val: self._view_do("goto_page", val - 1))
+        tb.addWidget(self.page_spin)
+        self.page_total = QLabel(" / 0 ")
+        tb.addWidget(self.page_total)
+        tb.addAction(self.a_next)
+
+        tb.addSeparator()
+
+        tb.addAction(self.a_zoom_out)
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.setEditable(True)
+        self.zoom_combo.addItems(ZOOM_PRESETS)
+        self.zoom_combo.setMinimumWidth(80)
+        self.zoom_combo.activated.connect(self._zoom_from_combo)
+        self.zoom_combo.lineEdit().editingFinished.connect(self._zoom_from_combo)
+        tb.addWidget(self.zoom_combo)
+        tb.addAction(self.a_zoom_in)
+        tb.addAction(self.a_fit_w)
+
+        # Inicialización de modo para sincronización interna
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Continuo", MODE_CONTINUOUS)
+        self.mode_combo.addItem("Una página", MODE_SINGLE)
+        self.mode_combo.addItem("Dos páginas", MODE_TWO)
+        self.mode_combo.activated.connect(
+            lambda _i: self._view_do("set_mode", self.mode_combo.currentData())
+        )
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
 
+        # Grupo 4: Utilidades, Privacidad y Búsqueda
+        tb.addAction(self.a_private_mode)
+        tb.addAction(self.a_side)
         tb.addAction(self.a_find)
 
     def _build_menu(self):
@@ -288,10 +338,17 @@ class MainWindow(QMainWindow):
         for a in (self.a_export_word, self.a_export_excel, self.a_export_images, self.a_export_text, self.a_export_html):
             sub_export.addAction(a)
         m.addSeparator()
-        for a in (self.a_save, self.a_save_as, self.a_save_sanitized, self.a_print, self.a_close):
-            m.addAction(a)
+        m.addAction(self.a_save)
+        m.addAction(self.a_save_as)
+        m.addAction(self.a_compress)
+        m.addAction(self.a_save_sanitized)
+        m.addAction(self.a_print)
         m.addSeparator()
-        m.addAction(self.a_quit)
+        m.addAction(self.a_private_mode)
+        m.addAction(self.a_clear_privacy)
+        m.addSeparator()
+        for a in (self.a_close, self.a_quit):
+            m.addAction(a)
 
         m = mb.addMenu("&Edición")
         m.addAction(self.a_undo)
@@ -313,6 +370,11 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("&Ver")
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p):
             m.addAction(a)
+        m.addSeparator()
+        sub_mode = m.addMenu("Modo de visualización")
+        sub_mode.addAction("Continuo", lambda: self._view_do("set_mode", MODE_CONTINUOUS))
+        sub_mode.addAction("Una página", lambda: self._view_do("set_mode", MODE_SINGLE))
+        sub_mode.addAction("Dos páginas", lambda: self._view_do("set_mode", MODE_TWO))
         m.addSeparator()
         m.addAction(self.a_rot_l)
         m.addAction(self.a_rot_r)
@@ -343,7 +405,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_side, self.a_find, self.a_find_next, self.a_find_prev,
                   self.a_open, self.a_save, self.a_save_as, self.a_close, self.a_quit,
-                  self.a_new_files, self.a_combine,
+                  self.a_new_files, self.a_combine, self.a_compress,
                   self.a_undo, self.a_redo, self.a_pg_rot_l, self.a_pg_rot_r,
                   self.a_move_up, self.a_move_down,
                   self.a_tool_pan, self.a_tool_select, self.a_tool_text,
@@ -1079,41 +1141,109 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error en OCR", str(exc))
 
-    def optimize_document(self):
+    def compress_document(self):
         tab = self.current_tab()
         if not tab:
             return
-        dlg = OptimizeDialog(self)
+
+        current_size = 0
+        if tab.path and os.path.exists(tab.path):
+            current_size = os.path.getsize(tab.path)
+        else:
+            try:
+                current_size = len(tab.doc.tobytes())
+            except Exception:
+                current_size = 0
+
+        doc_name = os.path.basename(tab.path) if tab.path else (tab.suggested_name or "documento.pdf")
+        dlg = CompressPdfDialog(current_doc_title=doc_name, current_size_bytes=current_size, parent=self)
         if dlg.exec() != QDialog.Accepted:
             return
-        base = (os.path.splitext(tab.path)[0] if tab.path else "documento") + "_optimizado.pdf"
-        out_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF optimizado", base, PDF_FILTER)
+
+        cfg = dlg.get_settings()
+        base = (os.path.splitext(tab.path)[0] if tab.path else "documento") + "_comprimido.pdf"
+        out_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF comprimido", base, PDF_FILTER)
         if not out_path:
             return
-        compress = dlg.compress_images()
-        quality = dlg.image_quality()
-        sanitize = dlg.sanitize()
+
         try:
             orig_sz, final_sz, saving = run_blocking(
                 self,
-                "Optimizando y comprimiendo el documento…",
+                "Comprimiendo y optimizando documento…",
                 lambda: opt.optimize_document(
-                    tab.doc, out_path, compress_images=compress, image_quality=quality, sanitize_metadata=sanitize
+                    tab.doc,
+                    out_path,
+                    compress_images=cfg["compress_images"],
+                    image_quality=cfg["quality"],
+                    max_dpi=cfg["max_dpi"],
+                    sanitize_metadata=cfg["sanitize"],
+                    max_dim=cfg["max_dim"],
                 ),
             )
             orig_mb = round(orig_sz / 1024 / 1024, 2)
             final_mb = round(final_sz / 1024 / 1024, 2)
             msg = (
-                f"¡Optimización finalizada!\n\n"
+                f"Compresión finalizada con éxito.\n\n"
                 f"• Tamaño original: {orig_mb} MB ({orig_sz:,} bytes)\n"
-                f"• Tamaño optimizado: {final_mb} MB ({final_sz:,} bytes)\n"
-                f"• Reducción de peso: {saving}%\n\n"
-                f"Guardado en: {out_path}"
+                f"• Tamaño final: {final_mb} MB ({final_sz:,} bytes)\n"
+                f"• Reducción lograda: {saving}%\n\n"
+                f"¿Desea abrir el archivo comprimido en una nueva pestaña?"
             )
-            QMessageBox.information(self, "Optimización completada", msg)
-            self.status_msg.setText(f"Optimizado: ahorro del {saving}% ({final_mb} MB)")
+            ans = QMessageBox.question(self, "Compresión Completada", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            self.status_msg.setText(f"Comprimido: {orig_mb} MB → {final_mb} MB (-{saving}%)")
+            if ans == QMessageBox.Yes:
+                self.open_file(out_path)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error al optimizar", str(exc))
+            QMessageBox.critical(self, "Error al comprimir", str(exc))
+
+    def optimize_document(self):
+        self.compress_document()
+
+    # ---------------------------------------------------------------- privacidad
+    def toggle_private_mode(self):
+        new_state = self.a_private_mode.isChecked()
+        set_private_mode(new_state)
+        self._sync_private_mode_ui()
+        if new_state:
+            QMessageBox.information(
+                self,
+                "Modo Privado Activado",
+                "Se activó la Sesión Privada (Cero Huella):\n\n"
+                "• Los documentos que abra no se guardarán en el historial ni en el Registro.\n"
+                "• Los archivos temporales se crearán en memoria segura y se destruirán al cerrar la aplicación.",
+            )
+        else:
+            self.status_msg.setText("Modo privado desactivado")
+
+    def _sync_private_mode_ui(self):
+        priv = is_private_mode()
+        self.a_private_mode.setChecked(priv)
+        if priv:
+            self.setWindowTitle("Editor PDF Portable [SESIÓN PRIVADA - CERO HUELLA]")
+            self.a_private_mode.setText("🛡️ Sesión Privada (Activa)")
+        else:
+            self.setWindowTitle("Editor PDF Portable")
+            self.a_private_mode.setText("🛡️ Sesión Privada")
+
+    def clear_all_traces_now(self):
+        ans = QMessageBox.question(
+            self,
+            "Limpieza de Privacidad y Temporales",
+            "¿Desea destruir de inmediato todos los archivos temporales en disco "
+            "y limpiar por completo la lista de documentos recientes?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if ans == QMessageBox.Yes:
+            self._clear_recents()
+            cleaned = TempManager.cleanup_all()
+            QMessageBox.information(
+                self,
+                "Limpieza Completada",
+                f"Se han eliminado y sobreescrito de forma segura {cleaned} archivos/directorios temporales.\n"
+                "El historial de documentos recientes se ha vaciado.",
+            )
+            self.status_msg.setText("Historial y temporales eliminados con éxito")
 
     # ---------------------------------------------------------------- crear PDF
     def create_from_files(self):
@@ -1466,4 +1596,5 @@ class MainWindow(QMainWindow):
             if not self.close_tab(0):
                 event.ignore()
                 return
+        TempManager.cleanup_all()
         event.accept()

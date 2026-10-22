@@ -245,7 +245,8 @@ class AttachmentWidget(QWidget):
                 return
 
             # Para otros formatos (Excel, Word, imágenes, etc.), guardar en archivo temporal y abrir en Windows
-            temp_dir = tempfile.mkdtemp(prefix="pdf_attachment_")
+            from .privacy import TempManager
+            temp_dir = TempManager.create_temp_dir(prefix="pdf_attachment_")
             temp_path = os.path.join(temp_dir, fn)
             with open(temp_path, "wb") as f:
                 f.write(data)
@@ -356,7 +357,8 @@ class AttachmentWidget(QWidget):
                 def _open_ext():
                     try:
                         d = get_attachment_bytes(self.doc, att)
-                        td = tempfile.mkdtemp(prefix="pdf_attachment_")
+                        from .privacy import TempManager
+                        td = TempManager.create_temp_dir(prefix="pdf_attachment_")
                         tp = os.path.join(td, fn)
                         with open(tp, "wb") as f:
                             f.write(d)
