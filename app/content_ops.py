@@ -27,7 +27,7 @@ def add_text_box(
         rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + w, rect.y0 + h)
 
     # Insertar texto dentro del rectángulo
-    page.insert_textbox(
+    rc = page.insert_textbox(
         rect,
         text,
         fontsize=fontsize,
@@ -35,6 +35,17 @@ def add_text_box(
         color=color,
         align=align,
     )
+    if rc < 0:
+        # Si el texto excede el rectángulo inicial, expandir verticalmente
+        expanded_rect = fitz.Rect(rect.x0, rect.y0, max(rect.x1, page.rect.width - 20), page.rect.height - 20)
+        page.insert_textbox(
+            expanded_rect,
+            text,
+            fontsize=fontsize,
+            fontname=fontname,
+            color=color,
+            align=align,
+        )
 
 
 def apply_redaction(
@@ -621,6 +632,7 @@ def replace_text_block(
     # Inserción del nuevo texto respetando exactamente el tamaño de fuente elegido
     if autofit:
         curr_fs = fontsize
+        fitted = False
         while curr_fs >= 4.5:
             rc = page.insert_textbox(
                 target_rect,
@@ -631,19 +643,31 @@ def replace_text_block(
                 align=align,
             )
             if rc >= 0:
+                fitted = True
                 break
             curr_fs -= 0.5
-        else:
-            page.insert_textbox(
-                target_rect,
-                new_text,
-                fontsize=4.5,
-                fontname=fontname,
-                color=color,
-                align=align,
-            )
+        if not fitted:
+            if card_border is None:
+                expanded = fitz.Rect(target_rect.x0, target_rect.y0, min(page.rect.width - 6.0, target_rect.x1 + 30.0), page.rect.height - 6.0)
+                page.insert_textbox(
+                    expanded,
+                    new_text,
+                    fontsize=4.5,
+                    fontname=fontname,
+                    color=color,
+                    align=align,
+                )
+            else:
+                page.insert_textbox(
+                    target_rect,
+                    new_text,
+                    fontsize=4.5,
+                    fontname=fontname,
+                    color=color,
+                    align=align,
+                )
     else:
-        page.insert_textbox(
+        rc = page.insert_textbox(
             target_rect,
             new_text,
             fontsize=fontsize,
@@ -651,6 +675,16 @@ def replace_text_block(
             color=color,
             align=align,
         )
+        if rc < 0 and card_border is None:
+            expanded = fitz.Rect(target_rect.x0, target_rect.y0, min(page.rect.width - 6.0, target_rect.x1 + 30.0), page.rect.height - 6.0)
+            page.insert_textbox(
+                expanded,
+                new_text,
+                fontsize=fontsize,
+                fontname=fontname,
+                color=color,
+                align=align,
+            )
 
     # Si había una tarjeta / recuadro, redibujar el contorno para garantizar máxima nitidez
     if card_border is not None:

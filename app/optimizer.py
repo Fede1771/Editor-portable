@@ -120,7 +120,10 @@ def optimize_document(
 
                         # Solo reemplazar si los bytes resultantes son estrictamente menores
                         if len(compressed_data) < raw_len:
-                            opt_doc.update_stream(xref, compressed_data)
+                            try:
+                                page.replace_image(xref, stream=compressed_data)
+                            except Exception:
+                                opt_doc.update_stream(xref, compressed_data)
                 except Exception:
                     continue
 
@@ -145,8 +148,9 @@ def optimize_document(
     opt_doc.close()
 
     final_size = os.path.getsize(out_path)
-    # Salvaguarda: si por alguna razón la optimización incrementara el peso, mantener la copia original
-    if final_size > initial_size and initial_size > 0:
+    # Salvaguarda: si por alguna razón la optimización incrementara el peso y NO se solicitó sanitización,
+    # mantener la copia original. Si se solicitó sanitización, preservamos el archivo limpio.
+    if final_size > initial_size and initial_size > 0 and not sanitize_metadata:
         with open(out_path, "wb") as f:
             f.write(initial_bytes)
         final_size = initial_size

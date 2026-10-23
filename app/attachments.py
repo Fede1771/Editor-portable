@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from typing import Callable
 
@@ -17,8 +18,23 @@ from PySide6.QtWidgets import (
 DANGEROUS_EXTENSIONS = {
     ".exe", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
     ".ps1", ".psm1", ".scr", ".pif", ".com", ".jar", ".reg", ".msi", ".dll",
-    ".hta", ".cpl", ".lnk", ".iso",
+    ".hta", ".cpl", ".lnk", ".iso", ".chm", ".url", ".docm", ".xlsm", ".pptm",
+    ".dotm", ".xltm", ".potm", ".wsc", ".inf", ".scf",
 }
+
+
+def sanitize_attachment_name(name: str) -> str:
+    """Sanitiza el nombre del archivo adjunto eliminando rutas relativas maliciosas (path traversal),
+
+    caracteres reservados en Windows y espacios/puntos al final.
+    """
+    if not name:
+        return "adjunto.dat"
+    base = os.path.basename(name.replace("\\", "/"))
+    cleaned = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "_", base).strip(". ")
+    if not cleaned:
+        cleaned = "adjunto.dat"
+    return cleaned
 
 
 def format_size(size_bytes: int) -> str:
@@ -246,8 +262,11 @@ class AttachmentWidget(QWidget):
 
             # Para otros formatos (Excel, Word, imágenes, etc.), guardar en archivo temporal y abrir en Windows
             from .privacy import TempManager
+            safe_name = sanitize_attachment_name(fn)
             temp_dir = TempManager.create_temp_dir(prefix="pdf_attachment_")
-            temp_path = os.path.join(temp_dir, fn)
+            temp_path = os.path.abspath(os.path.join(temp_dir, safe_name))
+            if not temp_path.startswith(os.path.abspath(temp_dir)):
+                raise ValueError("Ruta de archivo no válida.")
             with open(temp_path, "wb") as f:
                 f.write(data)
             os.startfile(temp_path)
@@ -258,7 +277,7 @@ class AttachmentWidget(QWidget):
         att = self._selected_item_data()
         if not att:
             return
-        fn = att["filename"]
+        fn = sanitize_attachment_name(att["filename"])
         target, _ = QFileDialog.getSaveFileName(self, "Guardar archivo adjunto", fn)
         if not target:
             return
@@ -276,11 +295,15 @@ class AttachmentWidget(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para extraer todos los adjuntos")
         if not folder:
             return
+        abs_folder = os.path.abspath(folder)
         saved_count = 0
         attachments = get_all_attachments(self.doc)
         for att in attachments:
-            fn = att["filename"]
-            target = os.path.join(folder, fn)
+            fn = sanitize_attachment_name(att["filename"])
+            target = os.path.abspath(os.path.join(abs_folder, fn))
+            # Garantizar que el destino no escape de la carpeta seleccionada (anti path-traversal)
+            if not target.startswith(abs_folder):
+                continue
             # Evitar colisión de nombres
             base, ext = os.path.splitext(target)
             cnt = 1
@@ -358,8 +381,11 @@ class AttachmentWidget(QWidget):
                     try:
                         d = get_attachment_bytes(self.doc, att)
                         from .privacy import TempManager
+                        safe_name = sanitize_attachment_name(fn)
                         td = TempManager.create_temp_dir(prefix="pdf_attachment_")
-                        tp = os.path.join(td, fn)
+                        tp = os.path.abspath(os.path.join(td, safe_name))
+                        if not tp.startswith(os.path.abspath(td)):
+                            raise ValueError("Ruta de archivo no válida.")
                         with open(tp, "wb") as f:
                             f.write(d)
                         os.startfile(tp)

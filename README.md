@@ -1,7 +1,13 @@
 # 📄 Editor PDF Portable
 
-> **Visualizador y editor de documentos PDF ligero, seguro y 100% offline para Windows.**  
-> No requiere instalación, no requiere permisos de administrador ni conexión a internet.
+[![Windows](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
+[![Offline](https://img.shields.io/badge/Seguridad-100%25%20Offline-success)](https://github.com/Fede1771/Editor-portable)
+[![Zero-Trace](https://img.shields.io/badge/Privacidad-Cero%20Huella-blueviolet)](https://github.com/Fede1771/Editor-portable)
+[![No Admin](https://img.shields.io/badge/Instalaci%C3%B3n-Sin%20Permisos%20de%20Admin-orange)](https://github.com/Fede1771/Editor-portable)
+[![Licencia](https://img.shields.io/badge/Licencia-MIT-brightgreen)](LICENSE)
+
+> **Visualizador y editor de documentos PDF profesional, ultraligero y 100% offline para Windows.**  
+> Diseñado para estudios jurídicos, aseguradoras, peritos, empresas y profesionales que manejan documentación sensible. No requiere instalación, no requiere permisos de administrador y nunca envía datos a internet.
 
 ---
 
@@ -9,7 +15,7 @@
 
 Hacé clic en el siguiente enlace para descargar la versión completa y lista para usar:
 
-### 👉 **[DESCARGAR EDITOR PDF PORTABLE (Última Versión)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)**
+### 👉 **[DESCARGAR EDITOR PDF PORTABLE (.ZIP)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)**
 
 *(Compatible con Windows 10 y Windows 11 de 64 bits)*
 
@@ -17,42 +23,55 @@ Hacé clic en el siguiente enlace para descargar la versión completa y lista pa
 
 ## ⚡ Cómo Usar en 3 Pasos
 
-1. **Descargá** el archivo `EditorPDFPortable.zip` desde el botón superior.
-2. Hacé clic derecho sobre el archivo descargado y elegí **"Extraer todo..."**.
-3. Abrí la carpeta y hacé doble clic en **`EditorPDFPortable.exe`** (o en `Abrir_EditorPortable.bat`).
+1. **Descargá** el archivo `EditorPDFPortable.zip` desde el enlace de arriba.
+2. Hacé clic derecho sobre el archivo descargado y elegí **"Extraer todo..."** (o descomprimilo en un pendrive o carpeta).
+3. Entrá a la carpeta extraída y hacé doble clic en **`EditorPDFPortable.exe`** (o en el acceso directo `Abrir_EditorPortable.bat`).
 
-¡Listo! Ya podés arrastrar cualquier archivo PDF a la ventana o usar `Ctrl + O` para empezar a trabajar.
+¡Listo! Ya podés arrastrar cualquier archivo PDF a la ventana o presionar `Ctrl + O` para comenzar a trabajar.
 
 ---
 
-## 🚀 ¿Qué podés hacer con este Editor?
+## 🚀 Características Principales
 
-### ✍️ Edición In Situ de Texto
-- Modificá títulos, fechas o párrafos directamente sobre el PDF.
-- Respeta automáticamente la tipografía, tamaño original, color y formato sin romper los fondos ni los bordes.
+### ✍️ Edición In Situ de Texto y Contenido
+- Modificá títulos, fechas, importes o párrafos directamente sobre el documento.
+- Respeta automáticamente la tipografía, tamaño de fuente, color y alineación sin romper el diseño ni los fondos originales.
+- Salvaguarda automática para evitar truncamiento o pérdidas de texto.
 
-### 🗜️ Compresión Inteligente de Archivos (Pólizas y Siniestros)
-- Reducí drásticamente el peso del documento para enviarlo por correo electrónico sin que rebote.
-- Perfiles específicos: **Póliza Ligera (< 5 MB)**, **Archivo Digital** y **Legajo Pericial/Siniestros (Máxima nitidez)**.
-- Optimización profunda de fuentes incrustadas e imágenes.
+### 🗜️ Compresión Inteligente de Archivos (Pólizas y Legajos)
+- Reducí drásticamente el peso de tus PDFs para enviarlos por correo electrónico o subirlos a portales web con límites estrictos.
+- **Perfiles preconfigurados:**
+  - 📧 **Póliza Ligera (< 5 MB):** Compresión alta y optimización a 130 DPI para correo.
+  - 📂 **Archivo Digital Corporativo:** Equilibrio óptimo de nitidez en pantalla (180 DPI, calidad 80%).
+  - ⚖️ **Legajo Pericial / Siniestros:** Máxima fidelidad en fotos de daños, sellos y firmas periciales (300 DPI, calidad 92%).
+- Subconjunto avanzado de fuentes (`font subsetting`) y compactación de objetos en streams.
 
-### 🛡️ Privacidad y Cero Huella (Zero-Trace)
-- **Modo Sesión Privada:** No guarda historial de nombres ni rutas de archivos en el Registro de Windows.
-- **Borrado seguro de temporales:** Los archivos temporales se sobreescriben antes de eliminarse, impidiendo la recuperación forense de datos sensibles.
-- **Copia anónima:** Guardá versiones limpias despojadas de nombres de usuario y metadatos de autor.
+### 🛡️ Privacidad Corporativa y Cero Huella (Zero-Trace)
+- **Modo Sesión Privada:** Bloquea la escritura de historial y rutas de archivos en el Registro de Windows.
+- **Borrado seguro forense (`Zero-Wipe`):** Los archivos temporales se sobrescriben en disco antes de eliminarse, impidiendo la recuperación de datos confidenciales con herramientas forenses.
+- **Copia anónima y sanitizada:** Eliminá con un clic nombres de usuario, autores de comentarios, rutas de carpetas y rastros XML/XMP.
 
-### 📑 Organización Completa de Páginas
-- Insertá páginas de otros PDFs o páginas en blanco.
-- Extraé, duplicá, rotá, mové o eliminá páginas con un clic.
-- Dividí documentos grandes por cantidad de páginas, rangos o marcadores.
-- Agregá marcas de agua, fondos o numeración correlativa tipo Bates (`Pág. 1 de 10`).
+### 🔏 Firmas Digitales y Formularios Interactivos (AcroForms)
+- Detección automática de **firmas digitales criptográficas**: Alertas de protección para evitar invalidar firmas existentes al guardar.
+- Visualización, completado y aplanado (`flatten`) de formularios interactivos con protección de campos de solo lectura.
 
-### 🛠️ Herramientas de Productividad
-- **Censurar / Redactar (`R`):** Tapá y eliminá de forma permanente información confidencial (DNI, tarjetas, datos personales).
-- **Anotar y Dibujar:** Resaltador fluorescente, lápiz libre a mano alzada, notas adhesivas y firmas.
-- **Insertar Imágenes:** Agregá sellos, firmas digitalizadas o fotos de inspección.
-- **Reconocimiento de Texto (OCR):** Convertí documentos escaneados en texto seleccionable y editable a 300 DPI.
-- **Exportar a otros formatos:** Convertí a Microsoft Word (`.docx`), Excel (`.xlsx`), imágenes o texto plano.
+### 📎 Explorador de Archivos Adjuntos Embebidos
+- Panel lateral dedicado para inspeccionar, extraer y adjuntar archivos dentro del PDF.
+- Protección integrada contra archivos ejecutables maliciosos y prevención de ataques de salto de directorio (`anti path-traversal`).
+
+### 📑 Organización y Gestión de Páginas
+- Insertá páginas en blanco o páginas procedentes de otros PDFs.
+- Reordená páginas arrastrándolas en el panel de miniaturas.
+- Duplicá, rotá, recortá o eliminá páginas fácilmente.
+- Dividí documentos masivos por cantidad fija de páginas, rangos personalizados o marcadores de índice.
+- Numeración correlativa tipo Bates (`Pág. 1 de 10`), marcas de agua y fondos institucionales.
+
+### 🔍 OCR Integrado y Búsqueda Rápida
+- **Reconocimiento Óptico de Caracteres (OCR):** Convertí documentos escaneados o fotos de documentos en texto seleccionable y copiable.
+- Barra de búsqueda flotante con navegación de coincidencias sin saltos.
+
+### 🔄 Conversión a Otros Formatos
+- Convertí a **Microsoft Word** (`.docx`), **Microsoft Excel** (`.xlsx` con protección contra inyección de fórmulas), imágenes en alta resolución o texto plano.
 
 ---
 
@@ -63,20 +82,26 @@ Hacé clic en el siguiente enlace para descargar la versión completa y lista pa
 | `Ctrl + O` | Abrir documento PDF |
 | `Ctrl + S` | Guardar cambios |
 | `Ctrl + Shift + S` | Guardar como... |
-| `Ctrl + Shift + C` | Comprimir PDF |
+| `Ctrl + Shift + C` | Comprimir PDF con perfiles inteligentes |
 | `Ctrl + P` | Imprimir documento |
 | `Ctrl + F` | Buscar texto en el documento |
-| `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer |
-| `Ctrl + 1` / `Ctrl + 2` | Ajustar vista al ancho / página completa |
-| `F4` | Mostrar / ocultar panel lateral de miniaturas |
-| `V` | Herramienta de selección de texto |
-| `T` | Herramienta de texto (editar in situ) |
+| `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer cambios |
+| `Ctrl + 1` / `Ctrl + 2` | Ajustar vista al ancho / a página completa |
+| `F4` | Mostrar / ocultar panel lateral de miniaturas y adjuntos |
+| `V` | Modo selección de texto |
+| `T` | Herramienta de texto / edición in situ |
 | `R` | Herramienta de censura / tachado permanente |
 | `Supr` | Eliminar páginas seleccionadas |
 
 ---
 
-## 🔒 Seguridad y Entorno Corporativo
+## 🔒 Seguridad y Privacidad Garantizada
 
-- **100% Offline:** No realiza conexiones a internet, no envía telemetría ni sube documentos a servidores externos. Los datos nunca salen de la computadora.
-- **Sin Instalador:** Puede ejecutarse directamente desde una memoria USB o desde una carpeta compartida de red en la empresa sin requerir permisos de administrador.
+- **100% Offline:** No realiza conexiones a internet, no recopila telemetría ni sube información a servidores en la nube. Todo el procesamiento se realiza localmente en tu computadora.
+- **Portabilidad Real:** Podés llevarlo en un pendrive USB o en una carpeta compartida de red corporativa y ejecutarlo directamente sin necesidad de instalar librerías adicionales.
+
+---
+
+## ⚖️ Licencia
+
+Distribuido bajo la Licencia MIT. Consultá el archivo [LICENSE](LICENSE) para más información.

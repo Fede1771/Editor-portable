@@ -803,23 +803,38 @@ class FillFormsDialog(_BaseDialog):
                 ftype = f["type"]
                 label_txt = f.get("label") or fname
                 val = f.get("value")
+                is_sig = f.get("is_signature", False)
+                is_ro = f.get("read_only", False)
 
-                if ftype == "CheckBox":
+                if is_sig:
+                    lbl_sig = QLabel("🔏 Firma Digital Protegida (Solo lectura)")
+                    lbl_sig.setStyleSheet("color: #1a73e8; font-weight: bold;")
+                    self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", lbl_sig)
+                elif ftype == "CheckBox":
                     chk = QCheckBox("Marcado")
                     chk.setChecked(bool(val) and val not in ("Off", "No", False, 0))
-                    self.widgets_map[fname] = ("checkbox", chk)
+                    if is_ro:
+                        chk.setEnabled(False)
+                    else:
+                        self.widgets_map[fname] = ("checkbox", chk)
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", chk)
-                elif ftype == "Choice" and f.get("choices"):
+                elif ftype in ("Choice", "ListBox", "ComboBox") and f.get("choices"):
                     combo = QComboBox()
                     for choice in f["choices"]:
                         combo.addItem(str(choice))
                     if val in f["choices"]:
                         combo.setCurrentText(str(val))
-                    self.widgets_map[fname] = ("choice", combo)
+                    if is_ro:
+                        combo.setEnabled(False)
+                    else:
+                        self.widgets_map[fname] = ("choice", combo)
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", combo)
                 else:
                     line = QLineEdit(str(val or ""))
-                    self.widgets_map[fname] = ("text", line)
+                    if is_ro:
+                        line.setReadOnly(True)
+                    else:
+                        self.widgets_map[fname] = ("text", line)
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", line)
 
         self.finish()

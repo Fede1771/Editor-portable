@@ -605,7 +605,25 @@ class MainWindow(QMainWindow):
             self._update_controls()
 
     # ---------------------------------------------------------------- guardar
+    def _confirm_signed_doc_overwrite(self, tab: DocTab) -> bool:
+        from .forms import document_has_signatures
+        if document_has_signatures(tab.doc):
+            r = QMessageBox.warning(
+                self,
+                "Documento con Firma Digital",
+                "Este documento contiene una o más firmas digitales criptográficas.\n\n"
+                "Guardar cambios modificará la estructura binaria del archivo e invalidará "
+                "la integridad de las firmas existentes.\n\n"
+                "¿Desea continuar y guardar los cambios de todas formas?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return r == QMessageBox.Yes
+        return True
+
     def _save_tab(self, tab: DocTab) -> bool:
+        if not self._confirm_signed_doc_overwrite(tab):
+            return False
         if tab.save_as_only or not tab.path:
             return self._save_tab_as(tab)
         try:
@@ -617,6 +635,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _save_tab_as(self, tab: DocTab) -> bool:
+        if not self._confirm_signed_doc_overwrite(tab):
+            return False
         base = os.path.splitext(tab.path)[0] + ".pdf" if tab.path else tab.suggested
         path, _ = QFileDialog.getSaveFileName(self, "Guardar como", base, PDF_FILTER)
         if not path:
@@ -1168,7 +1188,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 current_size = 0
 
-        doc_name = os.path.basename(tab.path) if tab.path else (tab.suggested_name or "documento.pdf")
+        doc_name = os.path.basename(tab.path) if tab.path else getattr(tab, "suggested", "documento.pdf")
         dlg = CompressPdfDialog(current_doc_title=doc_name, current_size_bytes=current_size, parent=self)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -1249,7 +1269,12 @@ class MainWindow(QMainWindow):
         )
         if ans == QMessageBox.Yes:
             self._clear_recents()
-            cleaned = TempManager.cleanup_all()
+            active_paths: set[str] = set()
+            for i in range(self.tabs.count()):
+                tab = self.tabs.widget(i)
+                if hasattr(tab, "get_active_temp_paths"):
+                    active_paths.update(tab.get_active_temp_paths())
+            cleaned = TempManager.cleanup_all(exclude=active_paths)
             QMessageBox.information(
                 self,
                 "Limpieza Completada",

@@ -362,6 +362,35 @@ def main():
     app.processEvents()
     print("  -> Cero Huella (TempManager) y Compresión Inteligente OK")
 
+    print("[14/14] Probando robustez avanzada post-auditoría (anti-traversal, formula injection, firmas)...")
+    from app.attachments import sanitize_attachment_name
+    assert sanitize_attachment_name("../../evil.exe") == "evil.exe"
+    assert sanitize_attachment_name("C:\\Windows\\system32\\calc.exe") == "calc.exe"
+    assert sanitize_attachment_name("archivo.pdf   ") == "archivo.pdf"
+    assert sanitize_attachment_name("test:stream.txt") == "test_stream.txt"
+
+    from app.conversion import _safe_excel_cell
+    assert _safe_excel_cell("=1+1") == "'=1+1"
+    assert _safe_excel_cell("@SUM(A1:A10)") == "'@SUM(A1:A10)"
+    assert _safe_excel_cell("-cmd|' /C calc'!A0") == "'-cmd|' /C calc'!A0"
+    assert _safe_excel_cell("Texto normal") == "Texto normal"
+
+    from app.forms import document_has_signatures
+    doc_clean = fitz.open()
+    doc_clean.new_page()
+    assert document_has_signatures(doc_clean) is False
+    doc_clean.close()
+
+    # Probar que TempManager.cleanup_all respeta el conjunto de exclusión
+    p1 = TempManager.create_temp_file(prefix="test_exc1_", suffix=".tmp", content=b"DATA1")
+    p2 = TempManager.create_temp_file(prefix="test_exc2_", suffix=".tmp", content=b"DATA2")
+    TempManager.cleanup_all(exclude={p1})
+    assert os.path.exists(p1), "p1 debió preservarse porque estaba excluido"
+    assert not os.path.exists(p2), "p2 debió eliminarse por cleanup_all"
+    TempManager.cleanup_path(p1)
+    assert not os.path.exists(p1)
+    print("  -> Robustez avanzada post-auditoría OK")
+
     # Limpieza de temporales de prueba
     import shutil
     shutil.rmtree(out_dir, ignore_errors=True)

@@ -8,27 +8,30 @@ from typing import Sequence
 import pymupdf as fitz
 
 
+def _safe_excel_cell(val: object | None) -> str:
+    """Previene inyecciones de fórmulas maliciosas en Excel (CSV/formula injection)."""
+    if val is None:
+        return ""
+    s = str(val)
+    if s.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + s
+    return s
+
+
 def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None = None) -> None:
-    """Convierte el documento PDF a Microsoft Word (.docx)."""
+    """Convierte el documento PDF en vivo a Microsoft Word (.docx)."""
     from pdf2docx import Converter
+    from .privacy import TempManager
 
-    temp_pdf = None
-    # Si el documento fue modificado en memoria o no tiene ruta en disco, guardarlo a temporal
-    if not src_path or not os.path.isfile(src_path):
-        fd, temp_pdf = tempfile.mkstemp(suffix=".pdf")
-        os.close(fd)
-        doc.save(temp_pdf, garbage=3, deflate=True)
-        effective_src = temp_pdf
-    else:
-        effective_src = src_path
-
+    fd, temp_pdf = TempManager.create_temp_file(prefix="pdf_word_", suffix=".pdf")
+    os.close(fd)
+    doc.save(temp_pdf, garbage=3, deflate=True)
     try:
-        cv = Converter(effective_src)
+        cv = Converter(temp_pdf)
         cv.convert(out_docx_path)
         cv.close()
     finally:
-        if temp_pdf and os.path.exists(temp_pdf):
-            os.remove(temp_pdf)
+        TempManager.cleanup_path(temp_pdf)
 
 
 def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
@@ -51,7 +54,7 @@ def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
             sheet_title = f"Pág {pno + 1} Tab {t_idx + 1}"[:31]
             ws = wb.create_sheet(title=sheet_title)
             for row in table.extract():
-                ws.append([cell if cell is not None else "" for cell in row])
+                ws.append([_safe_excel_cell(cell) for cell in row])
 
     # Si no se detectaron tablas tabuladas estructuradas, exportar líneas de texto por renglón
     if total_tables == 0:
@@ -60,7 +63,7 @@ def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
             ws.append([f"--- PÁGINA {pno + 1} ---"])
             for line in doc[pno].get_text("text").splitlines():
                 if line.strip():
-                    ws.append([line.strip()])
+                    ws.append([_safe_excel_cell(line.strip())])
 
     if len(wb.sheetnames) > 1 and default_sheet in wb.worksheets:
         wb.remove(default_sheet)

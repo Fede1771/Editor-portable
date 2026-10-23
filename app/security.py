@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 DANGEROUS_EXTENSIONS = {
     ".exe", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
     ".ps1", ".psm1", ".scr", ".pif", ".com", ".jar", ".reg", ".msi", ".dll",
-    ".hta", ".cpl", ".lnk", ".iso",
+    ".hta", ".cpl", ".lnk", ".iso", ".chm", ".url", ".docm", ".xlsm", ".pptm",
+    ".dotm", ".xltm", ".potm", ".wsc", ".inf", ".scf",
 }
 
 
@@ -121,7 +122,7 @@ def sanitize_document(doc: fitz.Document) -> int:
 
 
 def sanitize_metadata(doc: fitz.Document) -> None:
-    """Despoja al documento de nombres de usuario, rutas de disco, software de autoría y rastros XMP."""
+    """Despoja al documento de nombres de usuario, rutas de disco, software de autoría, rastros XMP y autores de anotaciones."""
     doc.set_metadata({
         "title": "",
         "author": "",
@@ -134,6 +135,17 @@ def sanitize_metadata(doc: fitz.Document) -> None:
     })
     try:
         doc.del_xml_metadata()
+    except Exception:
+        pass
+
+    # Anonimizar metadatos de autor en todas las anotaciones existentes
+    try:
+        for page in doc:
+            for annot in page.annots():
+                info = annot.info
+                if info.get("title"):
+                    info["title"] = "Usuario"
+                    annot.set_info(info)
     except Exception:
         pass
 

@@ -48,7 +48,7 @@ def secure_wipe_file(file_path: str) -> None:
             return
         size = os.path.getsize(file_path)
         if size > 0:
-            with open(file_path, "ba+", buffering=0) as f:
+            with open(file_path, "r+b") as f:
                 f.seek(0)
                 # Sobrescribir con ceros en bloques de 64 KB
                 chunk_size = 65536
@@ -58,7 +58,10 @@ def secure_wipe_file(file_path: str) -> None:
                     f.write(b"\x00" * to_write)
                     remaining -= to_write
                 f.flush()
-                os.fsync(f.fileno())
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass
         os.remove(file_path)
     except Exception:
         # Fallback a borrado estándar si está bloqueado o con permisos restringidos
@@ -134,20 +137,25 @@ class TempManager:
             secure_wipe_file(abs_p)
 
     @classmethod
-    def cleanup_all(cls) -> None:
-        """Destruye con sobreescritura segura todos los temporales registrados en la sesión."""
+    def cleanup_all(cls, exclude: set[str] | None = None) -> int:
+        """Destruye con sobreescritura segura los temporales registrados en la sesión, excepto los excluidos."""
+        exclude_set = {os.path.abspath(p) for p in (exclude or set())}
         with _LOCK:
-            paths = list(_REGISTERED_TEMP_PATHS)
-            _REGISTERED_TEMP_PATHS.clear()
+            to_clean = [p for p in _REGISTERED_TEMP_PATHS if p not in exclude_set]
+            _REGISTERED_TEMP_PATHS.difference_update(to_clean)
 
-        for p in paths:
+        count = 0
+        for p in to_clean:
             try:
                 if os.path.isdir(p):
                     secure_wipe_dir(p)
+                    count += 1
                 elif os.path.isfile(p):
                     secure_wipe_file(p)
+                    count += 1
             except Exception:
                 pass
+        return count
 
     @classmethod
     def sweep_orphaned_temps(cls) -> int:

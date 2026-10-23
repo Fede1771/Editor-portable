@@ -303,6 +303,11 @@ class PdfView(QAbstractScrollArea):
         self._hit_index = -1
         self.viewport().update()
 
+    def current_hit(self) -> tuple[int, int]:
+        if not self._hits or self._hit_index < 0:
+            return 0, 0
+        return self._hit_index + 1, len(self._hits)
+
     def next_hit(self) -> tuple[int, int]:
         if self._hits:
             self._hit_index = (self._hit_index + 1) % len(self._hits)

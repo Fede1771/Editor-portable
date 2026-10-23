@@ -246,12 +246,16 @@ class _DocSnapshot:
         self._size = len(data)
         self._temp_path: str | None = None
         if self._size >= self.DISK_THRESHOLD:
-            from .privacy import TempManager
-            fd, path = TempManager.create_temp_file(prefix="editorpdf_snap_", suffix=".tmp")
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
-            self._temp_path = path
-            self._data: bytes | None = None
+            from .privacy import is_private_mode, TempManager
+            if is_private_mode():
+                # En modo privado / cero huella, preservar siempre en RAM para no tocar el disco
+                self._data = data
+            else:
+                fd, path = TempManager.create_temp_file(prefix="editorpdf_snap_", suffix=".tmp")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                self._temp_path = path
+                self._data = None
         else:
             self._data = data
 
@@ -351,6 +355,7 @@ class DocTab(QWidget):
             self.side.hide()
 
         self.thumbs.currentRowChanged.connect(self.view.goto_page)
+        self.thumbs.itemClicked.connect(lambda it: self.view.goto_page(self.thumbs.row(it)))
         self.bookmarks.itemClicked.connect(
             lambda item, _c: self.view.goto_page(item.data(0, BookmarkTree.PAGE_ROLE))
         )
@@ -369,6 +374,14 @@ class DocTab(QWidget):
         self.view.searchRequested.connect(self.show_search)
         self.check_security()
 
+    def get_active_temp_paths(self) -> set[str]:
+        """Retorna las rutas temporales de los snapshots activos en esta pestaña."""
+        paths = set()
+        for snap in self._undo + self._redo:
+            if getattr(snap, "_temp_path", None):
+                paths.add(snap._temp_path)
+        return paths
+
     def check_security(self):
         """Verifica pasivamente si el documento contiene scripts o acciones automáticas."""
         sec = scan_document_security(self.doc)
@@ -379,11 +392,9 @@ class DocTab(QWidget):
 
     def sanitize_security(self):
         """Desactiva y remueve permanentemente scripts y acciones del documento."""
-        self.push_undo()
-        cleaned = sanitize_document(self.doc)
-        self.modified = True
+        from .security import sanitize_document
+        self.run_edit(lambda d: sanitize_document(d))
         self.security_banner.show_cleaned()
-        self.edited.emit()
 
     def _on_attachment_changed(self):
         self.modified = True
@@ -545,7 +556,7 @@ class DocTab(QWidget):
     def _on_search_text(self, text: str):
         total = self.view.search(text)
         if total > 0:
-            i, n = self.view.next_hit()
+            i, n = self.view.current_hit()
             self.search_bar.set_result_status(i, n)
         else:
             self.search_bar.set_result_status(0, 0)

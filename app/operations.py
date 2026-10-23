@@ -140,6 +140,17 @@ def move_order(total: int, pages: list[int], direction: int) -> list[int] | None
 
 
 # ------------------------------------------------------------------- dividir
+def _collision_free_path(path: str) -> str:
+    """Evita la sobrescritura no deseada de archivos existentes."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    cnt = 1
+    while os.path.exists(f"{base} ({cnt}){ext}"):
+        cnt += 1
+    return f"{base} ({cnt}){ext}"
+
+
 def _save_part(doc: fitz.Document, pages: list[int], path: str) -> None:
     part = fitz.open()
     try:
@@ -156,7 +167,7 @@ def split_every(doc: fitz.Document, n: int, out_dir: str, base: str) -> list[str
     paths = []
     for k, start in enumerate(range(0, doc.page_count, n), 1):
         pages = list(range(start, min(start + n, doc.page_count)))
-        path = os.path.join(out_dir, f"{base}_parte{k:02d}.pdf")
+        path = _collision_free_path(os.path.join(out_dir, f"{base}_parte{k:02d}.pdf"))
         _save_part(doc, pages, path)
         paths.append(path)
     return paths
@@ -166,7 +177,7 @@ def split_ranges(doc: fitz.Document, text: str, out_dir: str, base: str) -> list
     paths = []
     for k, chunk in enumerate([c for c in re.split(r"[;|]", text) if c.strip()], 1):
         pages = parse_ranges(chunk, doc.page_count)
-        path = os.path.join(out_dir, f"{base}_parte{k:02d}.pdf")
+        path = _collision_free_path(os.path.join(out_dir, f"{base}_parte{k:02d}.pdf"))
         _save_part(doc, pages, path)
         paths.append(path)
     if not paths:
@@ -188,7 +199,7 @@ def split_by_bookmarks(doc: fitz.Document, out_dir: str, base: str) -> list[str]
         end = starts[k][0] if k < len(starts) else doc.page_count
         if end <= start:
             continue
-        path = os.path.join(out_dir, f"{base}_{k:02d}_{_safe_name(title)}.pdf")
+        path = _collision_free_path(os.path.join(out_dir, f"{base}_{k:02d}_{_safe_name(title)}.pdf"))
         _save_part(doc, list(range(start, end)), path)
         paths.append(path)
     return paths
