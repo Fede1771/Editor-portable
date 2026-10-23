@@ -18,6 +18,76 @@ MAX_ZOOM = 8.0
 CACHE_SIZE = 40
 MAX_CACHE_BYTES = 128 * 1024 * 1024  # 128 MB de presupuesto máximo de pixmaps (H36)
 MAX_RENDER_PIXELS = 24_000_000       # límite de píxeles por página renderizada (~6000x4000) (H36)
+MAX_THUMB_PIXELS = 65_536            # presupuesto máximo de píxeles para miniaturas (V08)
+
+
+def bounded_render_matrix(
+    page: fitz.Page,
+    scale_x: float = 1.0,
+    scale_y: float | None = None,
+    *,
+    rotation: int = 0,
+    max_pixels: int = MAX_RENDER_PIXELS,
+    max_width: float | None = None,
+    max_height: float | None = None,
+) -> fitz.Matrix:
+    """Calcula una matriz de renderizado acotada en ancho, alto y presupuesto total de píxeles (V08)."""
+    rect = page.rect
+    w = abs(float(rect.width))
+    h = abs(float(rect.height))
+    if w <= 0.0 or h <= 0.0 or not math.isfinite(w) or not math.isfinite(h):
+        raise ValueError("Dimensiones de página inválidas para renderizado.")
+    eff_w, eff_h = (h, w) if (rotation % 360) in (90, 270) else (w, h)
+    if max_width is not None and max_height is not None:
+        fit_scale = min(max_width / eff_w, max_height / eff_h)
+        sx = sy = fit_scale
+    else:
+        sx = float(scale_x)
+        sy = float(scale_x if scale_y is None else scale_y)
+
+    est_w = max(1.0, math.ceil(eff_w * sx))
+    est_h = max(1.0, math.ceil(eff_h * sy))
+    if est_w * est_h > max_pixels:
+        factor = math.sqrt(max_pixels / (est_w * est_h)) * 0.99
+        sx *= factor
+        sy *= factor
+
+    # Acotar también cada eje individual cuando el otro eje queda en 1 px (páginas extremas p. ej. 10 x 100.000)
+    if math.ceil(eff_w * sx) * max(1, math.ceil(eff_h * sy)) > max_pixels:
+        if math.ceil(eff_w * sx) <= 1:
+            sy = min(sy, (max_pixels - 1) / eff_h)
+        elif math.ceil(eff_h * sy) <= 1:
+            sx = min(sx, (max_pixels - 1) / eff_w)
+        else:
+            factor2 = math.sqrt(max_pixels / (math.ceil(eff_w * sx) * math.ceil(eff_h * sy))) * 0.98
+            sx *= factor2
+            sy *= factor2
+
+    return fitz.Matrix(sx, sy).prerotate(rotation)
+
+
+def render_bounded_pixmap(
+    page: fitz.Page,
+    *,
+    scale: float | None = None,
+    dpi: int | None = None,
+    rotation: int = 0,
+    max_pixels: int = MAX_RENDER_PIXELS,
+    max_width: float | None = None,
+    max_height: float | None = None,
+    alpha: bool = False,
+) -> fitz.Pixmap:
+    """Renderiza un Pixmap garantizando que nunca supere el presupuesto de píxeles (V08)."""
+    base_scale = (dpi / 72.0) if dpi is not None else (scale if scale is not None else 1.0)
+    mat = bounded_render_matrix(
+        page,
+        base_scale,
+        rotation=rotation,
+        max_pixels=max_pixels,
+        max_width=max_width,
+        max_height=max_height,
+    )
+    return page.get_pixmap(matrix=mat, alpha=alpha)
 
 MODE_CONTINUOUS = "continuous"
 MODE_SINGLE = "single"
@@ -499,11 +569,12 @@ class PdfView(QAbstractScrollArea):
             self._cache.move_to_end(key)
             return pix
         scale = self._zoom * dpr
-        eff_w, eff_h = self._eff_size(i)
-        est_pixels = max(1.0, eff_w * scale) * max(1.0, eff_h * scale)
-        if est_pixels > MAX_RENDER_PIXELS:
-            scale *= math.sqrt(MAX_RENDER_PIXELS / est_pixels)
-        matrix = fitz.Matrix(scale, scale).prerotate(self._rotation)
+        matrix = bounded_render_matrix(
+            self.doc[i],
+            scale,
+            rotation=self._rotation,
+            max_pixels=MAX_RENDER_PIXELS,
+        )
         pm = self.doc[i].get_pixmap(matrix=matrix, alpha=False)
         img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888).copy()
         pix = QPixmap.fromImage(img)
@@ -1317,8 +1388,7 @@ class PdfView(QAbstractScrollArea):
             self.goto_page(self.page_count - 1)
             event.accept()
         elif event.matches(QKeySequence.Copy):
-            if self._selected_text:
-                QApplication.clipboard().setText(self._selected_text)
+            self._copy_selection()
             event.accept()
         else:
             super().keyPressEvent(event)

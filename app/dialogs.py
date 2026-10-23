@@ -4,12 +4,12 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import QPointF, QStandardPaths, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPen
+from PySide6.QtCore import QPointF, QSize, QStandardPaths, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QSlider, QSpinBox,
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea, QSlider, QSpinBox,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -786,14 +786,24 @@ class AddNoteDialog(_BaseDialog):
 
 
 class FillFormsDialog(_BaseDialog):
-    """Diálogo interactivo para inspeccionar y rellenar campos de formulario (AcroForms) (H21, H22, H50)."""
+    """Diálogo interactivo para inspeccionar y rellenar campos de formulario (AcroForms) (H21, H22, H50, O03)."""
 
     def __init__(self, fields: list[dict], parent=None):
         super().__init__("Completar campos de formulario", parent)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self.widgets_map: dict[str, tuple[str, QWidget]] = {}
         self.widgets_group: dict[str, list[tuple[str, QWidget]]] = {}
         self._syncing = False
+
+        # O03: envolver el formulario en QScrollArea y limitar la altura máxima al alto disponible de pantalla.
+        self.outer.removeItem(self.form)
+        self._form_container = QWidget(self)
+        self._form_container.setLayout(self.form)
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setWidget(self._form_container)
+        self.outer.addWidget(self.scroll_area, 1)
 
         if not fields:
             lbl_empty = QLabel("Este documento no contiene campos de formulario interactivos.")
@@ -879,6 +889,19 @@ class FillFormsDialog(_BaseDialog):
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", line)
 
         self.finish()
+        self._max_dialog_height = self._compute_max_height()
+        self.setMaximumHeight(self._max_dialog_height)
+
+    def _compute_max_height(self) -> int:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        avail_h = screen.availableGeometry().height() if screen is not None else 800
+        return max(360, min(680, int(avail_h * 0.82)))
+
+    def sizeHint(self) -> QSize:
+        base = super().sizeHint()
+        content_h = self._form_container.sizeHint().height() + self.buttons.sizeHint().height() + 48
+        max_h = getattr(self, "_max_dialog_height", self._compute_max_height())
+        return QSize(max(520, base.width()), min(max_h, max(220, content_h)))
 
     def _register_widget(self, fname: str, kind: str, widget: QWidget) -> None:
         self.widgets_map[fname] = (kind, widget)

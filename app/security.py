@@ -85,21 +85,38 @@ def _iter_page_annot_xrefs(doc, page) -> list[int]:
 
 def _action_locations(doc):
     """Ubicaciones reales de acciones, compartidas por escáner y limpiador."""
-    from .pdf_objects import get_value
+    from .pdf_objects import (
+        get_value, iter_acroform_field_xrefs, iter_outline_xrefs,
+    )
     cat = doc.pdf_catalog()
     for key in ("OpenAction", "AA"):
         value = get_value(doc, cat, key)
         if value is not None:
             yield cat, key, value, "catálogo"
+    for bm_xref in iter_outline_xrefs(doc):
+        for key in ("A", "AA"):
+            value = get_value(doc, bm_xref, key)
+            if value is not None:
+                yield bm_xref, key, value, "marcador"
+    seen_field_xrefs: set[int] = set()
     for pno, page in enumerate(doc):
-        value = get_value(doc, page.xref, "AA")
-        if value is not None:
-            yield page.xref, "AA", value, f"página {pno + 1}"
+        for key in ("AA", "PresSteps"):
+            value = get_value(doc, page.xref, key)
+            if value is not None:
+                yield page.xref, key, value, f"página {pno + 1}"
         for xref in _iter_page_annot_xrefs(doc, page):
+            seen_field_xrefs.add(xref)
             for key in ("A", "AA"):
                 value = get_value(doc, xref, key)
                 if value is not None:
                     yield xref, key, value, f"anotación/campo de página {pno + 1}"
+    for xref in iter_acroform_field_xrefs(doc):
+        if xref in seen_field_xrefs:
+            continue
+        for key in ("A", "AA"):
+            value = get_value(doc, xref, key)
+            if value is not None:
+                yield xref, key, value, "campo de formulario"
 
 
 def scan_document_security(doc: fitz.Document) -> dict:
@@ -121,7 +138,7 @@ def scan_document_security(doc: fitz.Document) -> dict:
             has_launch |= "/Launch" in types
             has_open_action |= key == "OpenAction"
             active = types & _DANGEROUS_ACTIONS
-            if key in {"AA", "OpenAction"} or active:
+            if key in {"AA", "OpenAction", "PresSteps"} or active:
                 details.append(f"Acción en {label} ({key}: {', '.join(sorted(types)) or 'automática'})")
     except Exception as exc:
         incomplete = True
@@ -135,9 +152,56 @@ def scan_document_security(doc: fitz.Document) -> dict:
             "threat_details": list(dict.fromkeys(details))}
 
 
+def _collect_indirect_action_xrefs(doc, xref: int, key_path: str) -> list[int]:
+    """Recopila objetos indirectos de acción bajo `key_path` para limpiarlos en memoria."""
+    from .pdf_objects import ArrayObject, DictionaryObject, IndirectObject, parse_object, MAX_TRAVERSAL_NODES
+    parts = [p for p in key_path.split("/") if p]
+    cur_xref = xref
+    prefix: list[str] = []
+    for part in parts[:-1]:
+        sub_key = "/".join(prefix + [part])
+        kind, val = doc.xref_get_key(cur_xref, sub_key)
+        if kind == "xref":
+            cur_xref = int(val.split()[0])
+            prefix = []
+        elif kind == "null":
+            return []
+        else:
+            prefix.append(part)
+    final_key = "/".join(prefix + [parts[-1]])
+    kind, raw = doc.xref_get_key(cur_xref, final_key)
+    if kind == "null":
+        return []
+    pending = [parse_object(raw)]
+    visited: set[int] = set()
+    action_xrefs: list[int] = []
+    while pending and len(visited) < MAX_TRAVERSAL_NODES:
+        obj = pending.pop()
+        if isinstance(obj, IndirectObject):
+            if obj.idnum in visited or obj.idnum <= 0:
+                continue
+            visited.add(obj.idnum)
+            t_kind, t_val = doc.xref_get_key(obj.idnum, "Type")
+            if t_val not in ("/Page", "/Pages", "/Catalog", "/Outlines", "/Annot"):
+                action_xrefs.append(obj.idnum)
+            try:
+                pending.append(parse_object(doc.xref_object(obj.idnum)))
+            except Exception:
+                pass
+        elif isinstance(obj, ArrayObject):
+            pending.extend(obj)
+        elif isinstance(obj, DictionaryObject):
+            for k, v in obj.items():
+                if k in ("/P", "/Parent", "/First", "/Last", "/Prev"):
+                    continue
+                if isinstance(v, (DictionaryObject, ArrayObject, IndirectObject)):
+                    pending.append(v)
+    return action_xrefs
+
+
 def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
     """Limpiar claves de acción; XFA sólo con consentimiento explícito de pérdida."""
-    from .pdf_objects import DictionaryObject, NameObject
+    from .pdf_objects import DictionaryObject, NameObject, set_pdf_key_null
     xfa = has_xfa(doc)
     if xfa and not remove_xfa:
         raise UnsupportedActiveContentError(
@@ -145,13 +209,13 @@ def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
         )
     # Inspeccionar todo antes de comenzar: un error no debe producir limpieza parcial.
     locations = list(_action_locations(doc))
-    changes = []
+    changes: list[tuple[int, str]] = []
     for xref, key, value, label in locations:
         kinds = _action_types(doc, value)
-        if key in {"AA", "OpenAction"} or kinds & _DANGEROUS_ACTIONS:
+        if key in {"AA", "OpenAction", "PresSteps"} or kinds & _DANGEROUS_ACTIONS:
             root_kind = value.get("/S") if isinstance(value, DictionaryObject) else None
-            # Conservar URI simple y quitar únicamente su continuación activa.
-            if key == "A" and isinstance(root_kind, NameObject) and root_kind == "/URI":
+            # Conservar navegación simple (/URI, /GoTo, /Named) y quitar únicamente su continuación activa.
+            if key == "A" and isinstance(root_kind, NameObject) and str(root_kind) in {"/URI", "/GoTo", "/Named"}:
                 changes.append((xref, "A/Next"))
             else:
                 changes.append((xref, key))
@@ -160,8 +224,13 @@ def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
         changes.append((cat, "Names/JavaScript"))
     if xfa:
         changes.append((cat, "AcroForm/XFA"))
+    detached_xrefs: set[int] = set()
     for xref, key in changes:
-        doc.xref_set_key(xref, key, "null")
+        detached_xrefs.update(_collect_indirect_action_xrefs(doc, xref, key))
+        set_pdf_key_null(doc, xref, key)
+    for act_xref in detached_xrefs:
+        for k in ("S", "JS", "F", "Win", "Unix", "Mac", "Next", "URI"):
+            doc.xref_set_key(act_xref, k, "null")
     return len(changes)
 
 
@@ -510,7 +579,8 @@ class SafeLinkDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _copy_url(self):
-        QApplication.clipboard().setText(self.url)
+        from .privacy import copy_to_clipboard
+        copy_to_clipboard(self.url)
         self.accept()
 
     def _open_url(self):

@@ -7,10 +7,10 @@ import tempfile
 from typing import Callable
 
 import pymupdf as fitz
-from PySide6.QtCore import QFileInfo, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog, QFileIconProvider, QHBoxLayout, QHeaderView,
-    QMenu, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem,
+    QMenu, QMessageBox, QPushButton, QStyle, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -259,6 +259,7 @@ class AttachmentWidget(QWidget):
         super().__init__(parent)
         self.doc = doc
         self.icon_provider = QFileIconProvider()
+        self.icon_provider.setOptions(QFileIconProvider.Option.DontUseCustomDirectoryIcons)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Nombre", "Tamaño"])
@@ -323,18 +324,18 @@ class AttachmentWidget(QWidget):
         attachments = get_all_attachments(self.doc)
         for att in attachments:
             fn = att["filename"]
+            display_name = safe_local_name(fn)
             sz = format_size(att["size"])
             dt = att["date"]
-            item = QTreeWidgetItem([fn, sz])
+            item = QTreeWidgetItem([display_name, sz])
             item.setData(0, Qt.UserRole, att)
 
-            # Icono nativo de Windows para la extensión del archivo
-            qfi = QFileInfo(fn)
-            icon = self.icon_provider.icon(qfi)
+            # V06: Icono genérico sin consultar rutas del PDF en el sistema de archivos ni red (SMB/UNC)
+            icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
             if not icon.isNull():
                 item.setIcon(0, icon)
 
-            tooltip = f"Archivo: {fn}\nTamaño: {sz}\nModificado: {dt}"
+            tooltip = f"Archivo: {display_name}\nTamaño: {sz}\nModificado: {dt}"
             if att.get("desc"):
                 tooltip += f"\nDescripción: {att['desc']}"
             item.setToolTip(0, tooltip)

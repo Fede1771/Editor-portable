@@ -13,12 +13,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .viewer import PdfView
+from .viewer import MAX_THUMB_PIXELS, PdfView, render_bounded_pixmap
 from .attachments import AttachmentWidget
 from .search_bar import FloatingSearchBar
 from .security import SecurityBanner, scan_document_security, sanitize_document
 
 THUMB_W = 120
+THUMB_H = int(THUMB_W * 1.42)
 UNDO_LIMIT = 15
 
 
@@ -93,6 +94,7 @@ class ThumbnailList(QListWidget):
         self.setSpacing(6)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._next = 0
+        self._failed_pages: set[int] = set()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._fill_batch)
         self.model().rowsMoved.connect(lambda *_: QTimer.singleShot(0, self._emit_order))
@@ -106,7 +108,8 @@ class ThumbnailList(QListWidget):
         self._timer.stop()
         self.blockSignals(True)
         self.clear()
-        thumb_h = int(THUMB_W * 1.42)
+        self._failed_pages.clear()
+        thumb_h = THUMB_H
         for i in range(self.doc.page_count):
             item = QListWidgetItem(str(i + 1))
             item.setData(self.ORIG_ROLE, i)
@@ -135,13 +138,27 @@ class ThumbnailList(QListWidget):
             if self._next >= self.doc.page_count:
                 self._timer.stop()
                 return
-            self._set_icon(self._next)
+            idx = self._next
             self._next += 1
+            if idx in self._failed_pages:
+                continue
+            try:
+                self._set_icon(idx)
+            except Exception as exc:
+                self._failed_pages.add(idx)
+                item = self.item(idx)
+                if item is not None:
+                    item.setToolTip(f"Miniatura no disponible: {exc}")
 
     def _set_icon(self, i: int):
         page = self.doc[i]
-        scale = THUMB_W / max(1.0, page.rect.width)
-        pm = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        pm = render_bounded_pixmap(
+            page,
+            max_width=THUMB_W,
+            max_height=THUMB_H,
+            max_pixels=MAX_THUMB_PIXELS,
+            alpha=False,
+        )
         img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888).copy()
         item = self.item(i)
         if item is not None:

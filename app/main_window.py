@@ -717,8 +717,7 @@ class MainWindow(QMainWindow):
             to_pg = max(from_pg, min(tab.doc.page_count - 1, to_pg))
 
             dpi = printer.resolution()
-            scale = dpi / 72.0
-            mat = fitz.Matrix(scale, scale)
+            from .viewer import render_bounded_pixmap
 
             first = True
             for pno in range(from_pg, to_pg + 1):
@@ -726,7 +725,7 @@ class MainWindow(QMainWindow):
                     printer.newPage()
                 first = False
                 page = tab.doc[pno]
-                pm = page.get_pixmap(matrix=mat, alpha=False)
+                pm = render_bounded_pixmap(page, dpi=dpi, alpha=False)
                 img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888)
                 target_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
                 scaled = img.scaled(target_rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -899,9 +898,12 @@ class MainWindow(QMainWindow):
         )
         if r != QMessageBox.Yes:
             return
+        remove_xfa = self._confirm_xfa_removal(tab)
+        if remove_xfa is None:
+            return
         self._edit(
             tab,
-            lambda d: cops.apply_redaction(d, pno, rect),
+            lambda d: cops.apply_redaction(d, pno, rect, remove_xfa=remove_xfa),
             f"Censura permanente aplicada en página {pno + 1}",
             goto=pno,
         )
@@ -998,8 +1000,13 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         vals = dlg.values()
-        original = {f["name"]: f["value"] for f in fields}
-        vals = {name: val for name, val in vals.items() if val != original.get(name)}
+        by_name = {f["name"]: f for f in fields}
+        vals = {
+            name: val for name, val in vals.items()
+            if name in by_name
+            and forms_mod.normalize_field_value(by_name[name], val)
+            != forms_mod.normalize_field_value(by_name[name], by_name[name].get("value"))
+        }
         if not vals:
             self.status_msg.setText("No hubo cambios en los campos de formulario")
             return
@@ -1051,9 +1058,14 @@ class MainWindow(QMainWindow):
         pages = self._scoped_pages(tab, dlg)
         if pages is None:
             return
+        remove_xfa = self._confirm_xfa_removal(tab)
+        if remove_xfa is None:
+            return
         matches_count = [0]
         def _do_find_redact(doc):
-            matches_count[0] = cops.redact_search_phrase(doc, phrase, pages=pages, fill_color=color)
+            matches_count[0] = cops.redact_search_phrase(
+                doc, phrase, pages=pages, fill_color=color, remove_xfa=remove_xfa
+            )
 
         if not self._edit(
             tab,
@@ -1198,6 +1210,24 @@ class MainWindow(QMainWindow):
         pages = self._scoped_pages(tab, dlg)
         if pages is None:
             return
+        unpreserved = ocr.pages_with_unpreserved_elements(tab.doc, pages)
+        if unpreserved["forms"] or unpreserved["annotations"]:
+            details = []
+            if unpreserved["forms"]:
+                details.append("campos de formulario en páginas " + ", ".join(map(str, unpreserved["forms"])))
+            if unpreserved["annotations"]:
+                details.append("anotaciones en páginas " + ", ".join(map(str, unpreserved["annotations"])))
+            ans = QMessageBox.warning(
+                self,
+                "Elementos interactivos en páginas OCR",
+                "Las páginas seleccionadas contienen " + " y ".join(details) +
+                " que se reemplazarán en la copia OCR si se reconoce texto en esas páginas.\n\n"
+                "¿Desea continuar de todos modos?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if ans != QMessageBox.Yes:
+                return
         lang = dlg.language()
         dpi = dlg.dpi()
         try:
