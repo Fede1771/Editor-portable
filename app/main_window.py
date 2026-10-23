@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
 
         # OCR, Compresión y Optimización
         self.a_ocr = self._act("Reconocer texto con OCR…", self.run_ocr, None, "Convertir documento escaneado a PDF con texto buscable")
-        self.a_compress = self._act("🗜 Comprimir PDF…", self.compress_document, "Ctrl+Shift+C", "Reducir tamaño del PDF con perfiles específicos para pólizas y siniestros")
+        self.a_compress = self._act("Comprimir PDF…", self.compress_document, "Ctrl+Shift+C", "Reducir tamaño del PDF con perfiles específicos para pólizas y siniestros")
         self.a_optimize = self.a_compress
         self.a_attachments = self._act("Archivos adjuntos…", self.show_attachments, "Ctrl+Shift+A", "Ver y gestionar los archivos adjuntos incrustados en el PDF")
 
@@ -225,8 +225,6 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         tb.setStyleSheet("""
             QToolBar {
-                background: #ffffff;
-                border-bottom: 1px solid #e0e4e8;
                 spacing: 4px;
                 padding: 3px 6px;
             }
@@ -235,24 +233,22 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px 7px;
                 font-size: 9pt;
-                color: #202124;
             }
             QToolButton:hover {
-                background-color: #f1f3f4;
-                border-color: #dadce0;
+                background-color: rgba(128, 128, 128, 0.18);
+                border-color: rgba(128, 128, 128, 0.28);
             }
             QToolButton:checked {
-                background-color: #e8f0fe;
+                background-color: rgba(26, 115, 232, 0.25);
                 border-color: #1a73e8;
-                color: #1a73e8;
                 font-weight: 600;
             }
             QToolButton:pressed {
-                background-color: #d2e3fc;
+                background-color: rgba(26, 115, 232, 0.4);
             }
             QToolBar::separator {
                 width: 1px;
-                background-color: #dadce0;
+                background-color: rgba(128, 128, 128, 0.3);
                 margin: 4px 6px;
             }
         """)
