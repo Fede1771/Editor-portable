@@ -3,9 +3,9 @@ Módulo para gestión, rellenado y aplanado de formularios PDF (AcroForms) y pro
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 import pymupdf as fitz
+from .pdf_objects import array_strings
 
 
 def has_signature_fields(doc: fitz.Document) -> bool:
@@ -67,22 +67,8 @@ def document_has_signatures(doc: fitz.Document) -> bool:
 
 
 def _parse_pdf_array_strings(raw_array: str) -> list[str]:
-    """Extrae cadenas literales (...) o nombres /Name de un array PDF como '[(A)(B)]'."""
-    items: list[str] = []
-    # Buscar literales entre paréntesis o nombres /Token
-    for m in re.finditer(r"\((?:\\.|[^\\)])*\)|/([^\s\[\]()<>/{}%]+)", raw_array):
-        tok = m.group(0)
-        if tok.startswith("(") and tok.endswith(")"):
-            inner = tok[1:-1]
-            inner = inner.replace(r"\(", "(").replace(r"\)", ")").replace(r"\\", "\\")
-            items.append(inner)
-        elif m.group(1):
-            items.append(m.group(1))
-    return items
-
-
-def _escape_pdf_string(val: str) -> str:
-    return val.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    """Cadenas PDF completas: literales, escapes octales y hex UTF-16."""
+    return array_strings(raw_array)
 
 
 def _normalize_choices(raw_choices: Any) -> list[str]:
@@ -125,7 +111,10 @@ def get_form_fields(doc: fitz.Document) -> list[dict[str, Any]]:
         for w in page.widgets():
             ft = w.field_type_string
             val: Any = w.field_value
-            choices = _normalize_choices(getattr(w, "choice_values", None))
+            raw_choices = getattr(w, "choice_values", None) or []
+            choices = _normalize_choices(raw_choices)
+            choice_labels = [str(c[1]) if isinstance(c, (list, tuple)) and len(c) > 1 else str(c)
+                             for c in raw_choices]
 
             is_sig = (w.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE)
             flags = getattr(w, "field_flags", 0) or 0
@@ -152,7 +141,9 @@ def get_form_fields(doc: fitz.Document) -> list[dict[str, Any]]:
                 "value": val,
                 "rect": w.rect,
                 "choices": choices,
+                "choice_labels": choice_labels,
                 "multi_select": is_multi,
+                "editable_choice": bool(flags & (1 << 18)),
                 "read_only": is_read_only or is_sig,
                 "is_signature": is_sig,
             })
@@ -169,7 +160,11 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
     count = 0
     multi_flag = getattr(fitz, "PDF_CH_FIELD_IS_MULTI_SELECT", 1 << 21)
     edit_flag = getattr(fitz, "PDF_CH_FIELD_IS_EDIT", 1 << 18)
-    applied_backups: list[tuple[int, int, Any, tuple[str, str]]] = []
+    # Restaurar diccionarios completos (/I, /V, padres y recursos), no sólo /V.
+    # Los streams originales de apariencia también pueden ser modificados por update().
+    objects = {x: doc.xref_object(x) for x in range(1, doc.xref_length())}
+    streams = {x: doc.xref_stream_raw(x) for x in objects
+               if doc.xref_is_stream(x) and doc.xref_get_key(x, "Subtype")[1] == "/Form"}
 
     try:
         for pno, page in enumerate(doc):
@@ -184,8 +179,6 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
                     continue
 
                 new_val = field_dict[w.field_name]
-                prev_v = doc.xref_get_key(w.xref, "V")
-                prev_fval = w.field_value
                 choices = _normalize_choices(getattr(w, "choice_values", None))
 
                 if w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
@@ -200,7 +193,7 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
                                     raise ValueError(f"Valor '{sv}' no válido para el campo '{w.field_name}'.")
                         w.field_value = str_vals[0] if str_vals else ""
                         w.update()
-                        arr_str = "[" + "".join(f"({_escape_pdf_string(sv)})" for sv in str_vals) + "]"
+                        arr_str = "[" + " ".join(fitz.get_pdf_str(sv) for sv in str_vals) + "]"
                         doc.xref_set_key(w.xref, "V", arr_str)
                         if choices:
                             idxs = sorted(choices.index(sv) for sv in str_vals if sv in choices)
@@ -216,26 +209,19 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
                     w.field_value = str(new_val)
                     w.update()
 
-                applied_backups.append((pno, w.xref, prev_fval, prev_v))
                 count += 1
     except Exception:
-        # Revertir los cambios parciales aplicados antes del fallo (N02)
-        for pno, xref, prev_fval, (vk, vv) in reversed(applied_backups):
-            try:
-                for rw in doc[pno].widgets():
-                    if rw.xref == xref:
-                        rw.field_value = prev_fval
-                        try:
-                            rw.update()
-                        except Exception:
-                            pass
-                        break
-                if vk == "null":
-                    doc.xref_set_key(xref, "V", "null")
-                elif vk in ("string", "name", "array", "int", "bool"):
-                    doc.xref_set_key(xref, "V", vv)
-            except Exception:
-                pass
+        # update() puede crear nuevos streams de apariencia. No conservar datos de la
+        # edición rechazada en objetos huérfanos aunque el llamador guarde sin garbage.
+        for xref in range(len(objects) + 1, doc.xref_length()):
+            if doc.xref_is_stream(xref):
+                doc.update_stream(xref, b"", compress=False)
+            doc.update_object(xref, "null")
+        for xref, raw in objects.items():
+            doc.update_object(xref, raw)
+        for xref, data in streams.items():
+            doc.update_stream(xref, data, compress=False)
+            doc.update_object(xref, objects[xref])
         raise
 
     return count

@@ -17,14 +17,15 @@ sys.path.insert(0, str(ROOT))
 
 # H39: aislar preferencias (no tocar el Registro / recientes reales del usuario)
 import tempfile as _tempfile
-os.environ.setdefault("EDITORPDF_SETTINGS_DIR", _tempfile.mkdtemp(prefix="editorpdf_test_settings_"))
+if not os.environ.get("EDITORPDF_SETTINGS_DIR"):
+    os.environ["EDITORPDF_SETTINGS_DIR"] = _tempfile.mkdtemp(prefix="editorpdf_test_settings_")
 
 import pymupdf as fitz
 from app import operations, creation, content_ops, ocr, conversion, optimizer, annotations, forms
 
-def main():
+def main(output_root: Path | None = None):
     print("=== INICIANDO SUITE DE PRUEBAS DE EDITOR PDF ===")
-    out_dir = ROOT / "tests" / "temp_output"
+    out_dir = (output_root or ROOT) / "tests" / "temp_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # 1. Creación
@@ -403,9 +404,9 @@ def main():
     print("\nTODAS LAS PRUEBAS COMPLETADAS CON EXITO.")
 
 
-def test_end_to_end_suite():
+def test_end_to_end_suite(tmp_path, qapp):
     """H39: Ejecuta la suite integral bajo pytest sin os._exit ni tocar preferencias reales."""
-    main()
+    main(tmp_path)
 
 
 if __name__ == "__main__":

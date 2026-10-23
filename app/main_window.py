@@ -24,7 +24,7 @@ from . import operations as ops
 from . import optimizer as opt
 from . import annotations as annot_mod
 from . import forms as forms_mod
-from .background import run_blocking
+from .background import run_blocking, run_pdf_job
 from .dialogs import (
     AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, CompressPdfDialog,
     ConvertImagesDialog, CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog,
@@ -604,20 +604,7 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- guardar
     def _confirm_signed_doc_overwrite(self, tab: DocTab) -> bool:
-        from .forms import document_has_signatures
-        if document_has_signatures(tab.doc):
-            r = QMessageBox.warning(
-                self,
-                "Documento con Firma Digital",
-                "Este documento contiene una o más firmas digitales criptográficas.\n\n"
-                "Guardar cambios modificará la estructura binaria del archivo e invalidará "
-                "la integridad de las firmas existentes.\n\n"
-                "¿Desea continuar y guardar los cambios de todas formas?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            return r == QMessageBox.Yes
-        return True
+        return tab.confirm_pdf_rewrite()
 
     def _save_tab(self, tab: DocTab) -> bool:
         if not self._confirm_signed_doc_overwrite(tab):
@@ -660,11 +647,26 @@ class MainWindow(QMainWindow):
         if tab:
             self._save_tab_as(tab)
 
+    def _confirm_xfa_removal(self, tab: DocTab) -> bool | None:
+        from .security import has_xfa
+        if not has_xfa(tab.doc):
+            return False
+        answer = QMessageBox.warning(
+            self, "Formulario XFA",
+            "El PDF contiene un formulario XFA que puede incluir scripts. Para sanearlo hay que "
+            "eliminar ese formulario y sus datos alternativos. El contenido PDF se conservará. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        return True if answer == QMessageBox.Yes else None
+
     def save_sanitized_current(self):
         tab = self.current_tab()
         if not tab:
             return
         if not self._confirm_signed_doc_overwrite(tab):
+            return
+        remove_xfa = self._confirm_xfa_removal(tab)
+        if remove_xfa is None:
             return
         from .security import create_sanitized_copy
         base = os.path.splitext(os.path.basename(tab.path) if tab.path else "documento")[0]
@@ -674,15 +676,16 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            create_sanitized_copy(tab.doc, out_path)
+            create_sanitized_copy(tab.doc, out_path, remove_xfa=remove_xfa)
             QMessageBox.information(
                 self,
                 "Copia anónima guardada",
                 f"Se ha guardado exitosamente la copia sanitizada en:\n{out_path}\n\n"
                 "• Metadatos de autor, software, fechas y comentarios: Anonimizados.\n"
                 "• Identificadores XML / XMP de rastreo: Eliminados.\n"
-                "• Scripts y acciones automáticas: Removidos.\n"
-                "• Marcadores y archivos adjuntos: Conservados.",
+                "• Acciones y scripts del PDF principal: Removidos.\n"
+                "• Marcadores y archivos adjuntos: Conservados; los adjuntos no se inspeccionan recursivamente.\n"
+                "• Cifrado del documento: Conservado.",
             )
             self.status_msg.setText(f"Copia anónima guardada: {out_path}")
         except Exception as exc:
@@ -835,6 +838,14 @@ class MainWindow(QMainWindow):
             block = cops.find_text_block_at(tab.doc[pno], fitz.Point(rect.x0, rect.y0), selection_rect=rect)
 
         if block is not None:
+            if block.get("has_mixed_styles") and QMessageBox.question(
+                self, "Selección con varios estilos",
+                "La selección contiene tipografías o colores diferentes. "
+                "Este editor aplicará un único formato al texto reemplazado. "
+                "Podés cancelar y seleccionar un fragmento de un solo estilo. ¿Continuar?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
             # Edición in-place del texto existente (como en Acrobat Pro)
             dlg = TextEditDialog(
                 default_text=block["text"],
@@ -987,6 +998,11 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         vals = dlg.values()
+        original = {f["name"]: f["value"] for f in fields}
+        vals = {name: val for name, val in vals.items() if val != original.get(name)}
+        if not vals:
+            self.status_msg.setText("No hubo cambios en los campos de formulario")
+            return
         updated = {"n": 0}
         def _do_update(d):
             updated["n"] = forms_mod.update_form_fields(d, vals)
@@ -1039,12 +1055,14 @@ class MainWindow(QMainWindow):
         def _do_find_redact(doc):
             matches_count[0] = cops.redact_search_phrase(doc, phrase, pages=pages, fill_color=color)
 
-        self._edit(
+        if not self._edit(
             tab,
             _do_find_redact,
-            f"Se censuraron {matches_count[0]} apariciones de «{phrase}»",
+            "Censura aplicada",
             goto=tab.view.current_page,
-        )
+        ):
+            return
+        self.status_msg.setText(f"Se censuraron {matches_count[0]} apariciones de «{phrase}»")
         QMessageBox.information(
             self,
             "Censura completada",
@@ -1083,10 +1101,10 @@ class MainWindow(QMainWindow):
         if not out_path:
             return
         try:
-            run_blocking(
+            run_pdf_job(
                 self,
                 "Convirtiendo PDF a Microsoft Word (.docx)…\nEsto puede tardar unos segundos.",
-                lambda: conv.convert_to_word(tab.doc, out_path, src_path=tab.path),
+                "word", tab.doc, out_path,
             )
             QMessageBox.information(self, "Conversión completada", f"Se exportó exitosamente a:\n{out_path}")
             self.status_msg.setText(f"Exportado a Word: {out_path}")
@@ -1102,10 +1120,10 @@ class MainWindow(QMainWindow):
         if not out_path:
             return
         try:
-            total_tables = run_blocking(
+            total_tables = run_pdf_job(
                 self,
                 "Extrayendo tablas a Excel…",
-                lambda: conv.convert_to_excel(tab.doc, out_path),
+                "excel", tab.doc, out_path,
             )
             msg = f"Se extrajeron {total_tables} tablas a:\n{out_path}" if total_tables else f"Se exportó el contenido a:\n{out_path}"
             QMessageBox.information(self, "Exportación a Excel", msg)
@@ -1127,10 +1145,10 @@ class MainWindow(QMainWindow):
         fmt = dlg.format()
         dpi = dlg.dpi()
         try:
-            exported = run_blocking(
+            exported = run_pdf_job(
                 self,
                 "Exportando páginas como imágenes…",
-                lambda: conv.convert_to_images(tab.doc, out_dir, fmt=fmt, dpi=dpi, pages=pages),
+                "images", tab.doc, out_dir, fmt=fmt, dpi=dpi, pages=pages,
             )
             QMessageBox.information(self, "Exportación completada", f"Se exportaron {len(exported)} páginas en:\n{out_dir}")
             self.status_msg.setText(f"Exportadas {len(exported)} imágenes a {out_dir}")
@@ -1172,6 +1190,8 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
+        if not self._confirm_signed_doc_overwrite(tab):
+            return
         dlg = OcrDialog(self)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -1181,15 +1201,25 @@ class MainWindow(QMainWindow):
         lang = dlg.language()
         dpi = dlg.dpi()
         try:
-            ocr_doc = run_blocking(
+            ocr_doc = run_pdf_job(
                 self,
                 f"Ejecutando reconocimiento de texto (OCR) en {len(pages)} páginas…\nEsto puede tardar unos instantes.",
-                lambda: ocr.ocr_document(tab.doc, language=lang, dpi=dpi, pages=pages),
+                "ocr", tab.doc, language=lang, dpi=dpi, pages=pages,
             )
+            report = ocr_doc._editorpdf_ocr_report
+            if not report["recognized"]:
+                ocr_doc.close()
+                QMessageBox.warning(self, "OCR sin reconocimiento", "No se pudo reconocer texto. El documento original se conservó sin cambios.")
+                return
             name = (os.path.splitext(os.path.basename(tab.path))[0] if tab.path else "documento") + "_OCR.pdf"
             self._add_tab("", ocr_doc, save_as_only=True, modified=True, suggested=name)
-            self.status_msg.setText(f"OCR finalizado: documento con texto buscable abierto como '{name}'")
-            QMessageBox.information(self, "OCR Completado", "El documento con texto reconocido y buscable se ha abierto en una nueva pestaña.\nGuardalo con Ctrl+S.")
+            message = f"OCR: {len(report['recognized'])} página(s) reconocidas."
+            if report["failed"]:
+                message += " Sin reconocer (conservadas del original): " + ", ".join(str(x["page"]) for x in report["failed"]) + "."
+            if report["fallback_language"]:
+                message += " Se usó inglés como alternativa en páginas " + ", ".join(map(str, report["fallback_language"])) + "."
+            self.status_msg.setText(message)
+            QMessageBox.information(self, "Resultado de OCR", message + "\nEl resultado se abrió en otra pestaña. Guardalo con Ctrl+S.")
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error en OCR", str(exc))
 
@@ -1215,24 +1245,25 @@ class MainWindow(QMainWindow):
             return
 
         cfg = dlg.get_settings()
+        remove_xfa = self._confirm_xfa_removal(tab) if cfg["sanitize"] else False
+        if remove_xfa is None:
+            return
         base = (os.path.splitext(tab.path)[0] if tab.path else "documento") + "_comprimido.pdf"
         out_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF comprimido", base, PDF_FILTER)
         if not out_path:
             return
 
         try:
-            orig_sz, final_sz, saving = run_blocking(
+            orig_sz, final_sz, saving = run_pdf_job(
                 self,
                 "Comprimiendo y optimizando documento…",
-                lambda: opt.optimize_document(
-                    tab.doc,
-                    out_path,
-                    compress_images=cfg["compress_images"],
-                    image_quality=cfg["quality"],
-                    max_dpi=cfg["max_dpi"],
-                    sanitize_metadata=cfg["sanitize"],
-                    max_dim=cfg["max_dim"],
-                ),
+                "optimize", tab.doc, out_path,
+                compress_images=cfg["compress_images"],
+                image_quality=cfg["quality"],
+                max_dpi=cfg["max_dpi"],
+                sanitize_metadata=cfg["sanitize"],
+                max_dim=cfg["max_dim"],
+                remove_xfa=remove_xfa,
             )
             orig_mb = round(orig_sz / 1024 / 1024, 2)
             final_mb = round(final_sz / 1024 / 1024, 2)
@@ -1262,9 +1293,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Modo Privado Activado",
-                "Se activó la Sesión Privada (Cero Huella):\n\n"
+                "Se activó la Sesión Privada:\n\n"
                 "• Los documentos que abra no se guardarán en el historial ni en el Registro.\n"
-                "• Los archivos temporales se crearán en memoria segura y se destruirán al cerrar la aplicación.",
+                "• El historial de edición permanece en RAM.\n"
+                "• Word, Office, adjuntos y escáner pueden necesitar temporales en disco; se aíslan y se intenta limpiarlos al finalizar.\n"
+                "No se garantiza ausencia total de rastros en el sistema o ante un cierre anómalo.",
             )
         else:
             self.status_msg.setText("Modo privado desactivado")
@@ -1273,7 +1306,7 @@ class MainWindow(QMainWindow):
         priv = is_private_mode()
         self.a_private_mode.setChecked(priv)
         if priv:
-            self.setWindowTitle("Editor PDF Portable [SESIÓN PRIVADA - CERO HUELLA]")
+            self.setWindowTitle("Editor PDF Portable [SESIÓN PRIVADA]")
             self.a_private_mode.setText("🛡️ Sesión Privada (Activa)")
         else:
             self.setWindowTitle("Editor PDF Portable")
@@ -1343,7 +1376,7 @@ class MainWindow(QMainWindow):
         if image.isNull():
             QMessageBox.information(self, "Portapapeles", "No hay ninguna imagen en el portapapeles.")
             return
-        tmp = tempfile.mkdtemp(prefix="editorpdf_")
+        tmp = TempManager.create_temp_dir(prefix="editorpdf_clipboard_")
         try:
             path = os.path.join(tmp, "portapapeles.png")
             image.save(path, "PNG")
@@ -1352,11 +1385,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No se pudo crear el PDF", str(exc))
             return
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            TempManager.cleanup_path(tmp)
         self._add_tab("", doc, save_as_only=True, modified=True, suggested="portapapeles.pdf")
 
     def create_from_scanner(self):
-        tmp = tempfile.mkdtemp(prefix="editorpdf_scan_")
+        tmp = TempManager.create_temp_dir(prefix="editorpdf_scan_")
         try:
             images: list[str] = []
             while True:
@@ -1380,7 +1413,7 @@ class MainWindow(QMainWindow):
                     return
                 self._add_tab("", doc, save_as_only=True, modified=True, suggested="escaneo.pdf")
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            TempManager.cleanup_path(tmp)
 
     def create_blank(self):
         self._add_tab("", creation.blank_document(1), save_as_only=True, modified=True, suggested="documento.pdf")
@@ -1451,6 +1484,8 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
+        if not self._confirm_signed_doc_overwrite(tab):
+            return
         sel = tab.selected_pages()
         base = os.path.splitext(tab.path)[0] + "_extraido.pdf" if tab.path else "extraido.pdf"
         path, _ = QFileDialog.getSaveFileName(self, "Guardar páginas extraídas", base, PDF_FILTER)
@@ -1505,6 +1540,8 @@ class MainWindow(QMainWindow):
     def split_document(self):
         tab = self.current_tab()
         if not tab:
+            return
+        if not self._confirm_signed_doc_overwrite(tab):
             return
         dlg = SplitDialog(tab.doc.page_count, bool(tab.doc.get_toc()), self)
         if tab.path:

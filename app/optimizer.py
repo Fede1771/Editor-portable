@@ -5,6 +5,7 @@ import os
 import pymupdf as fitz
 from PySide6.QtCore import QBuffer, QByteArray, Qt
 from PySide6.QtGui import QImage
+from .document_io import serialize_pdf, clone_pdf, save_pdf
 
 PROFILE_EMAIL = "email"
 PROFILE_STANDARD = "standard"
@@ -67,18 +68,26 @@ def optimize_document(
     max_dpi: int = 180,
     sanitize_metadata: bool = False,
     max_dim: int = 1800,
+    remove_xfa: bool = False,
 ) -> tuple[int, int, float]:
     """Optimiza el PDF reduciendo su peso, recomprimiendo imágenes según DPI físico, aplicando subconjunto de fuentes
     y compactando tablas de objetos en streams (H01, N01, H09, H25).
     Retorna (bytes_iniciales, bytes_finales, porcentaje_ahorro).
     """
-    initial_bytes = doc.tobytes()
+    initial_bytes = serialize_pdf(doc)
     initial_size = len(initial_bytes)
 
     # Clonar documento en memoria para trabajar sin alterar el original
-    opt_doc = fitz.open("pdf", initial_bytes)
+    opt_doc = clone_pdf(doc)
 
     if sanitize_metadata:
+        from .security import sanitize_document, sanitize_metadata as clean_metadata
+        try:
+            sanitize_document(opt_doc, remove_xfa=remove_xfa)
+            clean_metadata(opt_doc)
+        except Exception:
+            opt_doc.close()
+            raise
         opt_doc.set_metadata({})
         try:
             opt_doc.scrub(
@@ -141,7 +150,7 @@ def optimize_document(
                                 rgba_pix.width,
                                 rgba_pix.height,
                                 rgba_pix.stride,
-                                QImage.Format_RGBA8888,
+                                QImage.Format_RGBA8888_Premultiplied,
                             ).copy()
                             scaled = qimg.scaled(
                                 eff_max_w, eff_max_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -205,8 +214,8 @@ def optimize_document(
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     # Guardar con compactación máxima, compresión deflate profunda y streams de objetos
-    opt_doc.save(
-        out_path,
+    save_pdf(
+        opt_doc, out_path,
         garbage=4,
         clean=True,
         deflate=True,

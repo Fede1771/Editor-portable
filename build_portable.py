@@ -1,45 +1,42 @@
-"""Script de compilación para generar el ejecutable portable con PyInstaller (H38)."""
+"""Compilar y empaquetar el portable desde cualquier carpeta, sin publicar."""
+from __future__ import annotations
+import argparse
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 
-root = os.path.dirname(os.path.abspath(__file__))
-dist_dir = os.path.join(root, "dist")
-spec_file = os.path.join(root, "EditorPDFPortable.spec")
 
-# Limpiar cualquier perfil residual antiguo de LibreOffice dentro de data/ si existiera
-legacy_lo_profile = os.path.join(root, "data", "lo_profile")
-if os.path.isdir(legacy_lo_profile):
-    shutil.rmtree(legacy_lo_profile, ignore_errors=True)
+def main() -> int:
+    root = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dist-dir", type=Path, default=root / "dist")
+    parser.add_argument("--work-dir", type=Path, default=root / "build")
+    parser.add_argument("--no-zip", action="store_true")
+    args = parser.parse_args()
+    dist = args.dist_dir.resolve()
+    work = args.work_dir.resolve()
+    venv = root / ".venv/Scripts/python.exe"
+    python = str(venv) if venv.is_file() else sys.executable
+    cmd = [python, "-m", "PyInstaller", "--clean", "-y", "--distpath", str(dist),
+           "--workpath", str(work), str(root / "EditorPDFPortable.spec")]
+    print("Compilando el ejecutable portable...", flush=True)
+    proc = subprocess.run(cmd, cwd=root)
+    if proc.returncode:
+        return proc.returncode
+    bundle = dist / "EditorPDFPortable"
+    exe = bundle / "EditorPDFPortable.exe"
+    if not exe.is_file():
+        print("No se encontró el ejecutable de salida.", file=sys.stderr)
+        return 1
+    shutil.copy2(root / "Abrir_EditorPortable.bat", bundle / "Abrir_EditorPortable.bat")
+    print(f"Ejecutable generado: {exe}")
+    if not args.no_zip:
+        archive = shutil.make_archive(str(dist / "EditorPDFPortable"), "zip", str(dist), "EditorPDFPortable")
+        print(f"Paquete generado: {archive}")
+    return 0
 
-venv_pyinstaller = os.path.join(root, ".venv", "Scripts", "pyinstaller.exe")
-if os.path.isfile(venv_pyinstaller):
-    pyinstaller_cmd = [venv_pyinstaller, "--clean", "-y", spec_file]
-else:
-    pyinstaller_cmd = [sys.executable, "-m", "PyInstaller", "--clean", "-y", spec_file]
 
-print("Iniciando empaquetado portable...")
-print("Comando:", " ".join(pyinstaller_cmd))
-
-proc = subprocess.run(pyinstaller_cmd, cwd=root)
-if proc.returncode != 0:
-    print("Error al compilar.")
-    sys.exit(proc.returncode)
-
-bundle_dir = os.path.join(dist_dir, "EditorPDFPortable")
-exe_path = os.path.join(bundle_dir, "EditorPDFPortable.exe")
-if os.path.isfile(exe_path):
-    bat_src = os.path.join(root, "Abrir_EditorPortable.bat")
-    if os.path.isfile(bat_src):
-        shutil.copy2(bat_src, os.path.join(bundle_dir, "Abrir_EditorPortable.bat"))
-    print("==================================================")
-    print("¡COMPILACIÓN EXITOSA!")
-    print(f"Ejecutable generado en: {exe_path}")
-    zip_dest = os.path.join(dist_dir, "EditorPDFPortable")
-    print("Generando paquete comprimido EditorPDFPortable.zip...")
-    shutil.make_archive(zip_dest, "zip", dist_dir, "EditorPDFPortable")
-    print(f"Paquete listo para distribución en: {zip_dest}.zip")
-    print("==================================================")
-else:
-    print("El archivo ejecutable no fue encontrado en la carpeta dist.")
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -109,13 +109,9 @@ def replace_pages(doc: fitz.Document, pages: list[int], src_path: str, src_first
 
 
 def extract_pages(doc: fitz.Document, pages: list[int], out_path: str) -> None:
-    new = fitz.open()
-    try:
-        for group in _groups_of_consecutive(pages):
-            new.insert_pdf(doc, from_page=group[0], to_page=group[-1])
-        new.save(out_path, garbage=3, deflate=True)
-    finally:
-        new.close()
+    from .document_io import selected_copy, save_pdf
+    with selected_copy(doc, sorted(set(pages))) as new:
+        save_pdf(new, out_path, garbage=3, deflate=True)
 
 
 def reorder(doc: fitz.Document, order: list[int]) -> None:
@@ -152,13 +148,7 @@ def _collision_free_path(path: str) -> str:
 
 
 def _save_part(doc: fitz.Document, pages: list[int], path: str) -> None:
-    part = fitz.open()
-    try:
-        for g in _groups_of_consecutive(pages):
-            part.insert_pdf(doc, from_page=g[0], to_page=g[-1])
-        part.save(path, garbage=3, deflate=True)
-    finally:
-        part.close()
+    extract_pages(doc, pages, path)
 
 
 def split_every(doc: fitz.Document, n: int, out_dir: str, base: str) -> list[str]:

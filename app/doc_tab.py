@@ -430,8 +430,20 @@ class DocTab(QWidget):
 
     def sanitize_security(self):
         """Desactiva y remueve permanentemente scripts y acciones del documento."""
-        from .security import sanitize_document
-        self.run_edit(lambda d: sanitize_document(d))
+        from .security import sanitize_document, has_xfa
+        remove_xfa = has_xfa(self.doc)
+        if remove_xfa and QMessageBox.question(
+            self, "Formulario XFA",
+            "Para limpiar este PDF hay que eliminar su formulario XFA. "
+            "Se conservará el contenido PDF, pero se perderán los datos y funciones de XFA. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+        try:
+            self.run_edit(lambda d: sanitize_document(d, remove_xfa=remove_xfa))
+        except Exception as exc:
+            QMessageBox.warning(self, "No se pudo limpiar el documento", str(exc))
+            return
         sec = scan_document_security(self.doc)
         if sec.get("has_threats"):
             self.security_banner.show_threats(sec)
@@ -549,6 +561,8 @@ class DocTab(QWidget):
         self.run_edit(lambda d: ops.insert_blank(d, target, like=page_idx), select=[target], goto=target)
 
     def _extract_thumb_pages(self, pages: list[int]):
+        if not self.confirm_pdf_rewrite():
+            return
         from . import operations as ops
         base = os.path.splitext(self.path)[0] if self.path else "documento"
         out_path, _ = QFileDialog.getSaveFileName(
@@ -566,6 +580,17 @@ class DocTab(QWidget):
             )
 
     # ------------------------------------------------------------------ datos
+    def confirm_pdf_rewrite(self) -> bool:
+        from .forms import document_has_signatures
+        if not document_has_signatures(self.doc):
+            return True
+        return QMessageBox.warning(
+            self, "Documento con Firma Digital",
+            "Esta operación reescribirá un PDF con firmas digitales. "
+            "Las firmas existentes no se conservarán válidas en el resultado. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes
+
     @property
     def title(self) -> str:
         return ("• " if self.modified else "") + (os.path.basename(self.path) or "Sin título")
@@ -628,14 +653,8 @@ class DocTab(QWidget):
 
     def _serialize_doc_bytes(self) -> bytes:
         """Serializa el documento actual preservando su política de cifrado si fue autenticado (H04)."""
-        if self._auth_password is None:
-            self._auth_password = getattr(self.doc, "_editorpdf_password", None)
-        if self._auth_password is not None:
-            try:
-                return self.doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP)
-            except Exception:
-                pass
-        return self.doc.tobytes()
+        from .document_io import serialize_pdf
+        return serialize_pdf(self.doc)
 
     def run_edit(self, fn, select: list[int] | None = None, goto: int | None = None):
         """Aplica `fn(doc)` guardando una copia para deshacer. Si falla, restaura el documento."""
@@ -683,14 +702,8 @@ class DocTab(QWidget):
             self._refresh()
 
     def _load_bytes(self, data: bytes):
-        new = fitz.open("pdf", data)
-        if new.needs_pass and self._auth_password is not None:
-            new.authenticate(self._auth_password)
-        if self._auth_password is not None:
-            try:
-                setattr(new, "_editorpdf_password", self._auth_password)
-            except Exception:
-                pass
+        from .document_io import open_pdf
+        new = open_pdf(data, self._auth_password)
         old = self.doc
         self.doc = new
         self.thumbs.doc = new

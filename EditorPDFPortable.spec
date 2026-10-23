@@ -1,6 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 from PyInstaller.utils.hooks import collect_all
+
+# No resolver DLLs contra herramientas ajenas presentes en el PATH del shell.
+# Por ejemplo, ICU de Poppler no implementa la ABI de ICU de Windows usada por Qt.
+if sys.platform == "win32":
+    windows_dir = os.environ.get("SystemRoot", r"C:\Windows")
+    os.environ["PATH"] = os.pathsep.join([
+        sys.base_prefix, os.path.join(sys.base_prefix, "DLLs"),
+        os.path.join(sys.prefix, "Scripts"),
+        os.path.join(windows_dir, "System32"), windows_dir,
+    ])
 
 project_root = os.path.abspath(SPECPATH)
 data_dir = os.path.join(project_root, "data")
@@ -23,7 +34,7 @@ if os.path.isdir(tessdata_dir):
 
 binaries = []
 hiddenimports = []
-for pkg in ("fitz", "pymupdf", "pdf2docx", "openpyxl"):
+for pkg in ("fitz", "pymupdf", "pdf2docx", "openpyxl", "pypdf"):
     tmp_ret = collect_all(pkg)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
@@ -64,7 +75,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=os.environ.get("EDITORPDF_BUILD_CONSOLE") == "1",
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

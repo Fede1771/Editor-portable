@@ -710,7 +710,8 @@ class PdfView(QAbstractScrollArea):
             if not target.intersects(view_rect):
                 continue
             painter.fillRect(target.translated(3, 3), QColor(0, 0, 0, 60))
-            painter.drawPixmap(target.topLeft(), self._pixmap(i))
+            pixmap = self._pixmap(i)
+            painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
             painter.setPen(QPen(QColor(30, 30, 30), 1))
             painter.drawRect(target)
             for idx, r in hits_by_page.get(i, []):

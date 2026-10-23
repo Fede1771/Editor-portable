@@ -809,6 +809,7 @@ class FillFormsDialog(_BaseDialog):
                 is_ro = f.get("read_only", False)
                 is_multi = bool(f.get("multi_select", False)) or isinstance(val, (list, tuple))
                 choices = [str(c) for c in (f.get("choices") or [])]
+                labels = f.get("choice_labels") or choices
 
                 if is_sig:
                     lbl_sig = QLabel("🔏 Firma Digital Protegida (Solo lectura)")
@@ -828,8 +829,9 @@ class FillFormsDialog(_BaseDialog):
                     lw.setSelectionMode(QAbstractItemView.MultiSelection)
                     lw.setMaximumHeight(min(120, max(54, len(choices) * 22)))
                     selected_set = {str(x) for x in val} if isinstance(val, (list, tuple)) else ({str(val)} if val else set())
-                    for choice in choices:
-                        item = QListWidgetItem(choice)
+                    for choice, label in zip(choices, labels):
+                        item = QListWidgetItem(label)
+                        item.setData(Qt.UserRole, choice)
                         lw.addItem(item)
                         if choice in selected_set:
                             item.setSelected(True)
@@ -838,22 +840,31 @@ class FillFormsDialog(_BaseDialog):
                     else:
                         self._register_widget(fname, "listbox_multi", lw)
                         lw.itemSelectionChanged.connect(
-                            lambda n=fname, w=lw: self._sync_group(n, w, [it.text() for it in w.selectedItems()])
+                            lambda n=fname, w=lw: self._sync_group(n, w, [it.data(Qt.UserRole) for it in w.selectedItems()])
                         )
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", lw)
                 elif ftype in ("Choice", "ListBox", "ComboBox") and choices:
                     combo = QComboBox()
-                    for choice in choices:
-                        combo.addItem(choice)
+                    combo.setEditable(bool(f.get("editable_choice", False)))
+                    for choice, label in zip(choices, labels):
+                        combo.addItem(label, choice)
                     cur_val = str(val[0]) if isinstance(val, (list, tuple)) and val else str(val or "")
                     if cur_val in choices:
+                        combo.setCurrentIndex(combo.findData(cur_val))
+                    elif combo.isEditable():
+                        combo.setEditText(cur_val)
+                    elif cur_val:
+                        # Un valor existente fuera de /Opt no debe convertirse en la opción 0.
+                        combo.addItem(cur_val, cur_val)
                         combo.setCurrentText(cur_val)
+                    else:
+                        combo.setCurrentIndex(-1)
                     if is_ro:
                         combo.setEnabled(False)
                     else:
                         self._register_widget(fname, "choice", combo)
                         combo.currentTextChanged.connect(
-                            lambda txt, n=fname, w=combo: self._sync_group(n, w, txt)
+                            lambda txt, n=fname, w=combo: self._sync_group(n, w, self._choice_value(w))
                         )
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", combo)
                 else:
@@ -873,6 +884,12 @@ class FillFormsDialog(_BaseDialog):
         self.widgets_map[fname] = (kind, widget)
         self.widgets_group.setdefault(fname, []).append((kind, widget))
 
+    @staticmethod
+    def _choice_value(widget: QComboBox) -> str:
+        if widget.currentIndex() >= 0 and widget.currentText() == widget.itemText(widget.currentIndex()):
+            return widget.currentData()
+        return widget.currentText()
+
     def _sync_group(self, fname: str, source_widget: QWidget, new_val: object) -> None:
         """Sincroniza todas las representaciones de un mismo campo lógico en el diálogo (H22)."""
         if self._syncing:
@@ -887,12 +904,16 @@ class FillFormsDialog(_BaseDialog):
                 elif kind == "checkbox" and isinstance(w, QCheckBox):
                     w.setChecked(bool(new_val))
                 elif kind == "choice" and isinstance(w, QComboBox):
-                    w.setCurrentText(str(new_val))
+                    index = w.findData(new_val)
+                    if index >= 0:
+                        w.setCurrentIndex(index)
+                    elif w.isEditable():
+                        w.setEditText(str(new_val))
                 elif kind == "listbox_multi" and isinstance(w, QListWidget):
                     sel = set(new_val) if isinstance(new_val, (list, tuple, set)) else {str(new_val)}
                     for i in range(w.count()):
                         it = w.item(i)
-                        it.setSelected(it.text() in sel)
+                        it.setSelected(it.data(Qt.UserRole) in sel)
         finally:
             self._syncing = False
 
@@ -905,11 +926,11 @@ class FillFormsDialog(_BaseDialog):
             if ftype == "checkbox":
                 result[fname] = widget.isChecked()
             elif ftype == "listbox_multi":
-                result[fname] = [it.text() for it in widget.selectedItems()]
+                result[fname] = [it.data(Qt.UserRole) for it in widget.selectedItems()]
             elif ftype == "choice":
-                result[fname] = widget.currentText()
+                result[fname] = self._choice_value(widget)
             else:
-                result[fname] = widget.text().strip()
+                result[fname] = widget.text()
         return result
 
 

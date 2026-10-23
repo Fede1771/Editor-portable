@@ -36,11 +36,14 @@ def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None
 
     fd, temp_pdf = TempManager.create_temp_file(prefix="pdf_word_", suffix=".pdf")
     os.close(fd)
-    doc.save(temp_pdf, garbage=3, deflate=True)
     try:
+        # pdf2docx necesita un PDF accesible sin contraseña. Temporal aislado y limpieza en finally.
+        doc.save(temp_pdf, garbage=3, deflate=True)
         cv = Converter(temp_pdf)
-        cv.convert(out_docx_path)
-        cv.close()
+        try:
+            cv.convert(out_docx_path)
+        finally:
+            cv.close()
     finally:
         TempManager.cleanup_path(temp_pdf)
 

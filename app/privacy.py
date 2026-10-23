@@ -8,6 +8,8 @@ import re
 import shutil
 import tempfile
 import threading
+import json
+import time
 from typing import Callable
 
 from .settings_store import app_settings
@@ -22,7 +24,22 @@ _SESSION_PRIVATE_MODE: bool | None = None
 _PRIVATE_MODE_HOOKS: list[Callable[[bool], None]] = []
 _LAST_APP_CLIPBOARD_TEXT: str | None = None
 
-_PID_RE = re.compile(r"^(?:editorpdf|pdf_attachment|pdf_word)_p(\d+)_")
+_PID_RE = re.compile(r"^editorpdf_p(\d+)_")
+_OWNER_TAG = "EditorPDFPortable-temp-v1"
+_ORPHAN_MIN_AGE = 24 * 60 * 60
+
+
+def _temp_root() -> str:
+    root = os.path.abspath(os.path.join(tempfile.gettempdir(), "EditorPDFPortable"))
+    if os.path.islink(root) or getattr(os.path, "isjunction", lambda p: False)(root):
+        raise ValueError("La carpeta temporal de la aplicación no puede ser un enlace.")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _mark_owned(path: str) -> None:
+    with open(path + ".owner.json", "x", encoding="utf-8") as stream:
+        json.dump({"app": _OWNER_TAG, "pid": os.getpid(), "created": time.time()}, stream)
 
 
 def register_private_mode_hook(cb: Callable[[bool], None]) -> None:
@@ -32,7 +49,7 @@ def register_private_mode_hook(cb: Callable[[bool], None]) -> None:
 
 
 def is_private_mode() -> bool:
-    """Verifica si la sesión actual está en modo privado (sin persistencia en Registro ni temporales)."""
+    """Sesión sin recientes y con Undo en RAM; algunas conversiones requieren disco."""
     global _SESSION_PRIVATE_MODE
     if _SESSION_PRIVATE_MODE is not None:
         return _SESSION_PRIVATE_MODE
@@ -105,18 +122,24 @@ def _is_pid_running(pid: int) -> bool:
         try:
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
             STILL_ACTIVE = 259
-            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
             if not handle:
-                return False
+                return ctypes.get_last_error() != 87  # acceso denegado u otro error: no borrar
             try:
                 exit_code = ctypes.c_ulong()
-                if ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                if kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
                     return exit_code.value == STILL_ACTIVE
                 return True
             finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
+                kernel.CloseHandle(handle)
         except Exception:
-            return False
+            return True  # no se pudo demostrar que terminó
     else:
         try:
             os.kill(pid, 0)
@@ -128,6 +151,9 @@ def _is_pid_running(pid: int) -> bool:
 def secure_wipe_file(file_path: str) -> bool:
     """Sobreescribe el contenido del archivo con ceros antes de eliminarlo. Retorna True si dejó de existir (H03, H26)."""
     try:
+        if os.path.islink(file_path):
+            os.unlink(file_path)
+            return True
         if not os.path.exists(file_path):
             return True
         if os.path.isfile(file_path):
@@ -157,39 +183,38 @@ def secure_wipe_file(file_path: str) -> bool:
 
 
 def secure_wipe_dir(dir_path: str) -> bool:
-    """Sobrescribe y elimina recursivamente una carpeta y todos sus archivos temporales. Retorna True si se eliminó (H26)."""
+    """Limpiar el árbol propio sin seguir enlaces o junctions hacia otros directorios."""
     try:
+        if os.path.islink(dir_path) or getattr(os.path, "isjunction", lambda p: False)(dir_path):
+            os.rmdir(dir_path) if os.path.isdir(dir_path) else os.unlink(dir_path)
+            return True
         if not os.path.exists(dir_path):
             return True
-        if os.path.isdir(dir_path):
-            for root, dirs, files in os.walk(dir_path, topdown=False):
-                for name in files:
-                    secure_wipe_file(os.path.join(root, name))
-                for name in dirs:
-                    try:
-                        os.rmdir(os.path.join(root, name))
-                    except Exception:
-                        pass
-            os.rmdir(dir_path)
-    except Exception:
-        shutil.rmtree(dir_path, ignore_errors=True)
-    return not os.path.exists(dir_path)
+        with os.scandir(dir_path) as entries:
+            children = list(entries)
+        for entry in children:
+            if entry.is_dir(follow_symlinks=False):
+                secure_wipe_dir(entry.path)
+            else:
+                secure_wipe_file(entry.path)
+        os.rmdir(dir_path)
+    except OSError:
+        pass
+    return not os.path.lexists(dir_path)
 
 
 def _with_pid_prefix(prefix: str) -> str:
     """Incrusta el PID del proceso actual en el prefijo para distinguir instancias activas (H26)."""
-    if re.search(r"_p\d+_", prefix):
-        return prefix
-    base = prefix.rstrip("_")
-    return f"{base}_p{os.getpid()}_"
+    label = re.sub(r"[^a-zA-Z0-9_-]", "_", prefix).strip("_")
+    return f"editorpdf_p{os.getpid()}_{label}_"
 
 
 class TempManager:
-    """Gestor centralizado de ciclo de vida de archivos y carpetas temporales para cero huella."""
+    """Temporales aislados y limpieza verificable de mejor esfuerzo."""
 
     @classmethod
     def register(cls, path: str) -> str:
-        """Registra un archivo o carpeta temporal para su eliminación garantizada."""
+        """Registra un temporal para intentar limpiarlo y reintentar si falla."""
         if not path:
             return path
         abs_p = os.path.abspath(path)
@@ -200,19 +225,20 @@ class TempManager:
     @classmethod
     def create_temp_dir(cls, prefix: str = "editorpdf_") -> str:
         """Crea y registra un directorio temporal seguro asociado al PID actual (H26)."""
-        d = tempfile.mkdtemp(prefix=_with_pid_prefix(prefix))
-        return cls.register(d)
+        d = tempfile.mkdtemp(prefix=_with_pid_prefix(prefix), dir=_temp_root())
+        cls.register(d)
+        _mark_owned(d)
+        return d
 
     @classmethod
     def create_temp_file(cls, prefix: str = "editorpdf_", suffix: str = ".tmp", content: bytes | None = None) -> tuple[int, str] | str:
         """Crea y registra un archivo temporal seguro devolviendo (fd, path) o solo path si se pasó content."""
-        fd, path = tempfile.mkstemp(prefix=_with_pid_prefix(prefix), suffix=suffix)
+        fd, path = tempfile.mkstemp(prefix=_with_pid_prefix(prefix), suffix=suffix, dir=_temp_root())
         cls.register(path)
+        _mark_owned(path)
         if content is not None:
-            try:
-                os.write(fd, content)
-            finally:
-                os.close(fd)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
             return path
         return fd, path
 
@@ -225,11 +251,14 @@ class TempManager:
         abs_p = os.path.abspath(path)
         existed = os.path.exists(abs_p)
         ok = True
-        if os.path.isdir(abs_p):
+        if os.path.islink(abs_p):
+            ok = secure_wipe_file(abs_p)
+        elif os.path.isdir(abs_p):
             ok = secure_wipe_dir(abs_p)
         elif os.path.isfile(abs_p):
             ok = secure_wipe_file(abs_p)
         if ok and not os.path.exists(abs_p):
+            secure_wipe_file(abs_p + ".owner.json")
             with _LOCK:
                 _REGISTERED_TEMP_PATHS.discard(abs_p)
             return existed
@@ -261,28 +290,35 @@ class TempManager:
 
     @classmethod
     def sweep_orphaned_temps(cls) -> int:
-        """Limpia residuos temporales huérfanos de sesiones previas en %TEMP% sin tocar procesos activos (H26)."""
+        """Sólo residuos propios marcados, de más de 24 horas y con PID terminado."""
         count = 0
         try:
-            temp_root = tempfile.gettempdir()
+            temp_root = _temp_root()
             for entry in os.listdir(temp_root):
-                if not (entry.startswith("editorpdf_") or entry.startswith("pdf_attachment_") or entry.startswith("pdf_word_")):
+                if not entry.endswith(".owner.json"):
                     continue
-                m = _PID_RE.match(entry)
-                if m:
-                    owner_pid = int(m.group(1))
-                    if _is_pid_running(owner_pid):
+                name = entry[:-len(".owner.json")]
+                m = _PID_RE.match(name)
+                marker = os.path.join(temp_root, entry)
+                if not m or os.path.islink(marker):
+                    continue
+                try:
+                    with open(marker, encoding="utf-8") as stream:
+                        owner = json.load(stream)
+                    if (owner.get("app") != _OWNER_TAG or owner.get("pid") != int(m.group(1))
+                            or time.time() - float(owner["created"]) < _ORPHAN_MIN_AGE
+                            or _is_pid_running(owner["pid"])):
                         continue
-                full_p = os.path.join(temp_root, entry)
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                full_p = os.path.join(temp_root, name)
+                if os.path.dirname(os.path.realpath(full_p)) != os.path.realpath(temp_root):
+                    continue
                 if os.path.abspath(full_p) in _REGISTERED_TEMP_PATHS:
                     continue
                 try:
-                    if os.path.isdir(full_p):
-                        if secure_wipe_dir(full_p):
-                            count += 1
-                    elif os.path.isfile(full_p):
-                        if secure_wipe_file(full_p):
-                            count += 1
+                    if cls.cleanup_path(full_p):
+                        count += 1
                 except Exception:
                     pass
         except Exception:

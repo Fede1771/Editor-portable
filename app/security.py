@@ -27,244 +27,142 @@ DANGEROUS_EXTENSIONS = {
 }
 
 ALLOWED_BROWSER_SCHEMES = {"http", "https"}
-_DANGEROUS_ACTION_TOKENS = (
-    "/JavaScript", "/JS", "/Launch", "/ImportData", "/SubmitForm",
-    "/RichMediaExecute", "/GoToR", "/GoToE", "/Sound", "/Movie", "/Rendition",
-)
-_XREF_RE = re.compile(r"(\d+)\s+0\s+R")
+_DANGEROUS_ACTIONS = {
+    "/JavaScript", "/Launch", "/ImportData", "/SubmitForm", "/RichMediaExecute",
+    "/GoToR", "/GoToE", "/Sound", "/Movie", "/Rendition",
+}
 
 
-def _resolve_action_tree(doc: fitz.Document, raw_val: str, visited: set[int] | None = None) -> str:
-    """Expande recursivamente un valor o referencia de acción PDF (incluyendo /Next) evitando ciclos."""
-    if visited is None:
-        visited = set()
-    if not raw_val or raw_val == "null":
-        return ""
-    parts = [raw_val]
-    for m in _XREF_RE.finditer(raw_val):
-        xref = int(m.group(1))
-        if xref <= 0 or xref in visited:
-            continue
-        visited.add(xref)
-        try:
-            obj_str = doc.xref_object(xref) or ""
-        except Exception:
-            obj_str = ""
-        if obj_str:
-            parts.append(obj_str)
-            parts.append(_resolve_action_tree(doc, obj_str, visited))
-    return "\n".join(parts)
+class UnsupportedActiveContentError(ValueError):
+    pass
 
 
-def _iter_page_annot_xrefs(doc: fitz.Document, page: fitz.Page) -> list[int]:
-    """Obtiene todos los xrefs de anotaciones y widgets de una página sin duplicados."""
-    xrefs: list[int] = []
-    seen: set[int] = set()
-    try:
-        for a in page.annots():
-            if a.xref not in seen:
-                seen.add(a.xref)
-                xrefs.append(a.xref)
-    except Exception:
-        pass
-    try:
-        for w in page.widgets():
-            if w.xref not in seen:
-                seen.add(w.xref)
-                xrefs.append(w.xref)
-    except Exception:
-        pass
-    try:
-        kind, val = doc.xref_get_key(page.xref, "Annots")
-        if kind != "null":
-            expanded = _resolve_action_tree(doc, val)
-            for m in _XREF_RE.finditer(val + "\n" + expanded):
-                x = int(m.group(1))
-                if x > 0 and x not in seen:
-                    seen.add(x)
-                    xrefs.append(x)
-    except Exception:
-        pass
-    return xrefs
+def has_xfa(doc: fitz.Document) -> bool:
+    return doc.xref_get_key(doc.pdf_catalog(), "AcroForm/XFA")[0] != "null"
+
+
+def _action_types(doc, value) -> set[str]:
+    """Sólo diccionarios de acción, eventos y /Next; no strings ni backlinks /P."""
+    from .pdf_objects import ArrayObject, DictionaryObject, IndirectObject, NameObject, resolve
+    pending = [value]
+    visited = set()
+    types = set()
+    count = 0
+    while pending:
+        count += 1
+        if count > 10000:
+            raise ValueError("El árbol de acciones supera el límite de inspección.")
+        obj = pending.pop()
+        if isinstance(obj, IndirectObject):
+            if obj.idnum in visited:
+                continue
+            visited.add(obj.idnum)
+        obj = resolve(doc, obj)
+        if isinstance(obj, ArrayObject):
+            pending.extend(obj)
+        elif isinstance(obj, DictionaryObject):
+            kind = obj.get("/S")
+            if isinstance(kind, NameObject):
+                types.add(str(kind))
+                if obj.get("/Next") is not None:
+                    pending.append(obj.get("/Next"))
+            else:
+                # /AA es un diccionario de eventos; nunca interpretar su texto.
+                pending.extend(v for v in obj.values() if isinstance(v, (DictionaryObject, ArrayObject, IndirectObject)))
+    return types
+
+
+def _iter_page_annot_xrefs(doc, page) -> list[int]:
+    from .pdf_objects import get_value, ArrayObject, IndirectObject, field_chain
+    result = set()
+    values = get_value(doc, page.xref, "Annots")
+    if isinstance(values, ArrayObject):
+        for value in values:
+            if isinstance(value, IndirectObject):
+                result.update(field_chain(doc, value.idnum))
+    return sorted(result)
+
+
+def _action_locations(doc):
+    """Ubicaciones reales de acciones, compartidas por escáner y limpiador."""
+    from .pdf_objects import get_value
+    cat = doc.pdf_catalog()
+    for key in ("OpenAction", "AA"):
+        value = get_value(doc, cat, key)
+        if value is not None:
+            yield cat, key, value, "catálogo"
+    for pno, page in enumerate(doc):
+        value = get_value(doc, page.xref, "AA")
+        if value is not None:
+            yield page.xref, "AA", value, f"página {pno + 1}"
+        for xref in _iter_page_annot_xrefs(doc, page):
+            for key in ("A", "AA"):
+                value = get_value(doc, xref, key)
+                if value is not None:
+                    yield xref, key, value, f"anotación/campo de página {pno + 1}"
 
 
 def scan_document_security(doc: fitz.Document) -> dict:
-    """Escanea el documento (catálogo, páginas, anotaciones, widgets y adjuntos) en busca de scripts y acciones."""
-    threat_details: list[str] = []
-    has_js = False
-    has_launch = False
-    has_open_action = False
-
-    def _add_detail(msg: str) -> None:
-        if msg not in threat_details:
-            threat_details.append(msg)
-
-    cat_xref = doc.pdf_catalog()
-    if cat_xref > 0:
-        keys = doc.xref_get_keys(cat_xref)
-
-        # 1. /OpenAction en catálogo
-        if "OpenAction" in keys:
-            val = doc.xref_get_key(cat_xref, "OpenAction")[1]
-            if val != "null":
-                has_open_action = True
-                expanded = _resolve_action_tree(doc, val)
-                if "/Launch" in expanded:
-                    has_launch = True
-                    _add_detail("Acción automática de ejecución externa (/Launch)")
-                elif "/JavaScript" in expanded or "/JS" in expanded:
-                    has_js = True
-                    _add_detail("Script automático de inicio (/JavaScript)")
-                else:
-                    _add_detail("Acción automática de apertura (/OpenAction)")
-
-        # 2. /AA en catálogo
-        if "AA" in keys:
-            val = doc.xref_get_key(cat_xref, "AA")[1]
-            if val != "null":
-                expanded = _resolve_action_tree(doc, val)
-                if "/JavaScript" in expanded or "/JS" in expanded:
-                    has_js = True
-                if "/Launch" in expanded:
-                    has_launch = True
-                _add_detail("Disparadores de eventos automáticos en catálogo (/AA)")
-
-        # 3. /Names -> JavaScript (directo o indirecto)
-        if "Names" in keys:
-            names_kind, names_val = doc.xref_get_key(cat_xref, "Names")
-            if names_kind != "null":
-                js_kind, js_val = doc.xref_get_key(cat_xref, "Names/JavaScript")
-                expanded = _resolve_action_tree(doc, names_val)
-                if (js_kind != "null" and js_val != "null") or "/JavaScript" in expanded or "/JS" in expanded:
-                    has_js = True
-                    _add_detail("Scripts interactivos embebidos (Names/JavaScript)")
-
-    # 4. Páginas, anotaciones y widgets (/AA y cadenas /A -> /Next)
-    for pno in range(doc.page_count):
-        page = doc[pno]
-        p_keys = doc.xref_get_keys(page.xref)
-        if "AA" in p_keys and doc.xref_get_key(page.xref, "AA")[1] != "null":
-            expanded = _resolve_action_tree(doc, doc.xref_get_key(page.xref, "AA")[1])
-            if "/JavaScript" in expanded or "/JS" in expanded:
-                has_js = True
-            if "/Launch" in expanded:
-                has_launch = True
-            _add_detail(f"Acción automática en página {pno + 1} (/AA)")
-
-        for axref in _iter_page_annot_xrefs(doc, page):
-            try:
-                akeys = doc.xref_get_keys(axref)
-            except Exception:
-                continue
-            if "AA" in akeys and doc.xref_get_key(axref, "AA")[1] != "null":
-                expanded = _resolve_action_tree(doc, doc.xref_get_key(axref, "AA")[1])
-                if "/JavaScript" in expanded or "/JS" in expanded:
-                    has_js = True
-                if "/Launch" in expanded:
-                    has_launch = True
-                _add_detail(f"Disparador automático en anotación/campo de página {pno + 1} (/AA)")
-
-            if "A" in akeys and doc.xref_get_key(axref, "A")[1] != "null":
-                expanded = _resolve_action_tree(doc, doc.xref_get_key(axref, "A")[1])
-                if "/JavaScript" in expanded or "/JS" in expanded:
-                    has_js = True
-                    _add_detail(f"Acción de script en anotación/campo de página {pno + 1} (/JavaScript)")
-                if "/Launch" in expanded:
-                    has_launch = True
-                    _add_detail(f"Acción de lanzamiento externo en página {pno + 1} (/Launch)")
-                for tok in ("/ImportData", "/SubmitForm", "/RichMediaExecute", "/GoToR", "/GoToE"):
-                    if tok in expanded:
-                        _add_detail(f"Acción activa ({tok}) en página {pno + 1}")
-
-    # 5. Adjuntos ejecutables o activos (usando extensión canónica normalizada - H40)
-    from .attachments import canonical_extension, get_all_attachments, DANGEROUS_EXTENSIONS as _ATT_DANGEROUS
-    dangerous_files = []
-    for att in get_all_attachments(doc):
-        fn = att.get("filename") or att.get("name") or ""
-        ext = canonical_extension(fn)
-        if ext in DANGEROUS_EXTENSIONS or ext in _ATT_DANGEROUS:
-            dangerous_files.append(fn)
-    if dangerous_files:
-        _add_detail(f"Adjuntos potencialmente peligrosos: {', '.join(dangerous_files)}")
-
-    return {
-        "has_threats": len(threat_details) > 0,
-        "has_js": has_js,
-        "has_launch": has_launch,
-        "has_open_action": has_open_action,
-        "threat_details": threat_details,
-    }
-
-
-def _clean_action_on_xref(doc: fitz.Document, xref: int) -> int:
-    """Limpia acciones peligrosas (/AA y /A o su cadena /Next) en una anotación o widget."""
-    cleaned = 0
+    from .attachments import canonical_extension, get_all_attachments
+    details = []
+    has_js = has_launch = has_open_action = False
+    incomplete = False
+    xfa = has_xfa(doc)
+    if xfa:
+        details.append("Formulario XFA no inspeccionable: puede contener scripts y datos alternativos")
     try:
-        akeys = doc.xref_get_keys(xref)
-    except Exception:
-        return 0
+        cat = doc.pdf_catalog()
+        if doc.xref_get_key(cat, "Names/JavaScript")[0] != "null":
+            has_js = True
+            details.append("Scripts interactivos embebidos (Names/JavaScript)")
+        for xref, key, value, label in _action_locations(doc):
+            types = _action_types(doc, value)
+            has_js |= "/JavaScript" in types
+            has_launch |= "/Launch" in types
+            has_open_action |= key == "OpenAction"
+            active = types & _DANGEROUS_ACTIONS
+            if key in {"AA", "OpenAction"} or active:
+                details.append(f"Acción en {label} ({key}: {', '.join(sorted(types)) or 'automática'})")
+    except Exception as exc:
+        incomplete = True
+        details.append(f"Inspección de acciones incompleta: {exc}")
+    dangerous = [a.get("filename") or a.get("name") or "" for a in get_all_attachments(doc)
+                 if canonical_extension(a.get("filename") or a.get("name") or "") in DANGEROUS_EXTENSIONS]
+    if dangerous:
+        details.append("Adjuntos potencialmente peligrosos: " + ", ".join(dangerous))
+    return {"has_threats": bool(details), "has_js": has_js, "has_launch": has_launch,
+            "has_open_action": has_open_action, "has_xfa": xfa, "incomplete": incomplete,
+            "threat_details": list(dict.fromkeys(details))}
 
-    if "AA" in akeys and doc.xref_get_key(xref, "AA")[1] != "null":
-        doc.xref_set_key(xref, "AA", "null")
-        cleaned += 1
 
-    if "A" in akeys:
-        a_kind, a_val = doc.xref_get_key(xref, "A")
-        if a_val != "null":
-            expanded = _resolve_action_tree(doc, a_val)
-            if any(tok in expanded for tok in _DANGEROUS_ACTION_TOKENS):
-                # Si la acción raíz es un enlace URI simple pero encadena /Next peligroso, conservar solo el URI
-                if "/S /URI" in a_val and not any(tok in a_val.split("/Next")[0] for tok in _DANGEROUS_ACTION_TOKENS):
-                    doc.xref_set_key(xref, "A/Next", "null")
-                else:
-                    doc.xref_set_key(xref, "A", "null")
-                cleaned += 1
-    return cleaned
-
-
-def sanitize_document(doc: fitz.Document) -> int:
-    """Elimina permanentemente scripts, acciones automáticas y llamadas a ejecutables (H10)."""
-    cleaned = 0
-    cat_xref = doc.pdf_catalog()
-    if cat_xref > 0:
-        keys = doc.xref_get_keys(cat_xref)
-        if "OpenAction" in keys and doc.xref_get_key(cat_xref, "OpenAction")[1] != "null":
-            doc.xref_set_key(cat_xref, "OpenAction", "null")
-            cleaned += 1
-        if "AA" in keys and doc.xref_get_key(cat_xref, "AA")[1] != "null":
-            doc.xref_set_key(cat_xref, "AA", "null")
-            cleaned += 1
-        if "Names" in keys:
-            names_kind, names_val = doc.xref_get_key(cat_xref, "Names")
-            if names_val != "null":
-                js_kind, js_val = doc.xref_get_key(cat_xref, "Names/JavaScript")
-                if js_kind != "null" and js_val != "null":
-                    doc.xref_set_key(cat_xref, "Names/JavaScript", "null")
-                    cleaned += 1
-                if names_kind == "xref":
-                    try:
-                        nxref = int(names_val.split()[0])
-                        if "JavaScript" in doc.xref_get_keys(nxref):
-                            doc.xref_set_key(nxref, "JavaScript", "null")
-                            cleaned += 1
-                    except Exception:
-                        pass
-                # Si todavía persiste /JavaScript en Names, anular Names/JavaScript o Names
-                expanded_after = _resolve_action_tree(doc, doc.xref_get_key(cat_xref, "Names")[1])
-                if "/JavaScript" in expanded_after or "/JS" in expanded_after:
-                    doc.xref_set_key(cat_xref, "Names", "null")
-                    cleaned += 1
-
-    # Limpiar eventos y acciones en páginas, anotaciones y widgets
-    for page in doc:
-        p_keys = doc.xref_get_keys(page.xref)
-        if "AA" in p_keys and doc.xref_get_key(page.xref, "AA")[1] != "null":
-            doc.xref_set_key(page.xref, "AA", "null")
-            cleaned += 1
-        for axref in _iter_page_annot_xrefs(doc, page):
-            cleaned += _clean_action_on_xref(doc, axref)
-
-    return cleaned
+def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
+    """Limpiar claves de acción; XFA sólo con consentimiento explícito de pérdida."""
+    from .pdf_objects import DictionaryObject, NameObject
+    xfa = has_xfa(doc)
+    if xfa and not remove_xfa:
+        raise UnsupportedActiveContentError(
+            "El PDF contiene XFA. No se puede garantizar su saneamiento sin eliminar ese formulario."
+        )
+    # Inspeccionar todo antes de comenzar: un error no debe producir limpieza parcial.
+    locations = list(_action_locations(doc))
+    changes = []
+    for xref, key, value, label in locations:
+        kinds = _action_types(doc, value)
+        if key in {"AA", "OpenAction"} or kinds & _DANGEROUS_ACTIONS:
+            root_kind = value.get("/S") if isinstance(value, DictionaryObject) else None
+            # Conservar URI simple y quitar únicamente su continuación activa.
+            if key == "A" and isinstance(root_kind, NameObject) and root_kind == "/URI":
+                changes.append((xref, "A/Next"))
+            else:
+                changes.append((xref, key))
+    cat = doc.pdf_catalog()
+    if doc.xref_get_key(cat, "Names/JavaScript")[0] != "null":
+        changes.append((cat, "Names/JavaScript"))
+    if xfa:
+        changes.append((cat, "AcroForm/XFA"))
+    for xref, key in changes:
+        doc.xref_set_key(xref, key, "null")
+    return len(changes)
 
 
 def sanitize_metadata(doc: fitz.Document) -> None:
@@ -305,15 +203,15 @@ def sanitize_metadata(doc: fitz.Document) -> None:
         pass
 
 
-def create_sanitized_copy(doc: fitz.Document, out_path: str) -> None:
+def create_sanitized_copy(doc: fitz.Document, out_path: str, *, remove_xfa: bool = False) -> None:
     """Genera una copia anónima y sanitizada preservando la estructura documental (marcadores y adjuntos, H19)."""
-    raw = doc.tobytes()
-    copy_doc = fitz.open("pdf", raw)
+    from .document_io import clone_pdf, save_pdf
+    copy_doc = clone_pdf(doc)
     try:
         sanitize_metadata(copy_doc)
-        sanitize_document(copy_doc)
+        sanitize_document(copy_doc, remove_xfa=remove_xfa)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
-        copy_doc.save(out_path, deflate=True, garbage=4)
+        save_pdf(copy_doc, out_path, deflate=True, garbage=4)
     finally:
         copy_doc.close()
 

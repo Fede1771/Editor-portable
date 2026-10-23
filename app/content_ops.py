@@ -5,6 +5,18 @@ import os
 from typing import Sequence
 
 import pymupdf as fitz
+from .pdf_objects import field_chain, get_value
+
+
+def _page_bounds(page: fitz.Page) -> fitz.Rect:
+    """Límites en el mismo espacio no rotado que texto, widgets y dibujos."""
+    return (page.rect * page.derotation_matrix).normalize()
+
+
+def _field_has_phrase(doc, xref: int, phrase: str) -> bool:
+    return any(phrase in str(get_value(doc, parent, key) or "").casefold()
+               for parent in field_chain(doc, xref)
+               for key in ("V", "DV", "TU", "TM", "Opt"))
 
 
 def add_text_box(
@@ -21,7 +33,7 @@ def add_text_box(
     page = doc[page_idx]
     # Si el rect es muy pequeño o un punto, crear un área por defecto hacia abajo a la derecha
     if rect.width < 10 or rect.height < 10:
-        p_rect = page.rect
+        p_rect = _page_bounds(page)
         w = max(150.0, min(300.0, p_rect.x1 - rect.x0 - 20))
         h = max(30.0, fontsize * 2.5)
         rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + w, rect.y0 + h)
@@ -38,7 +50,7 @@ def add_text_box(
         align=align,
     )
     if rc < 0:
-        expanded_rect = fitz.Rect(rect.x0, rect.y0, max(rect.x1, page.rect.width - 20), page.rect.height - 20)
+        expanded_rect = fitz.Rect(rect.x0, rect.y0, max(rect.x1, _page_bounds(page).width - 20), _page_bounds(page).height - 20)
         test_shape2 = page.new_shape()
         rc = test_shape2.insert_textbox(
             expanded_rect,
@@ -67,20 +79,13 @@ def add_text_box(
 def _delete_widget_completely(doc: fitz.Document, page: fitz.Page, w: fitz.Widget) -> None:
     """Limpia valores y apariencias del widget y lo elimina de la página (H45)."""
     xref = getattr(w, "xref", 0) or 0
-    try:
-        w.field_value = ""
-    except Exception:
-        pass
     if xref > 0:
-        for key in ("V", "DV", "AP", "AS", "TU", "TM"):
-            try:
-                doc.xref_set_key(xref, key, "null")
-            except Exception:
-                pass
-    try:
-        page.delete_widget(w)
-    except Exception:
-        pass
+        for parent in field_chain(doc, xref):
+            for key in ("V", "DV", "TU", "TM", "Opt"):
+                doc.xref_set_key(parent, key, "null")
+        for key in ("AP", "AS"):
+            doc.xref_set_key(xref, key, "null")
+    page.delete_widget(w)
 
 
 def apply_redaction(
@@ -112,7 +117,7 @@ def redact_search_phrase(
     phrase_clean = phrase.strip()
     if not phrase_clean:
         return 0
-    phrase_low = phrase_clean.lower()
+    phrase_low = phrase_clean.casefold()
     target_pages = pages if pages is not None else range(doc.page_count)
     total_matches = 0
     for pno in target_pages:
@@ -128,7 +133,7 @@ def redact_search_phrase(
             val_str = str(w.field_value or "").lower()
             lbl_str = str(getattr(w, "field_label", "") or "").lower()
             intersects_match = any(w_rect.intersects(r) for r in matches)
-            has_secret_val = (phrase_low in val_str) or (phrase_low in lbl_str)
+            has_secret_val = _field_has_phrase(doc, w.xref, phrase_low)
             if intersects_match or has_secret_val:
                 if not intersects_match:
                     page_hits += 1
@@ -147,10 +152,7 @@ def redact_search_phrase(
                 if not intersects_match:
                     page_hits += 1
                 redact_rects.append(a_rect)
-                try:
-                    page.delete_annot(a)
-                except Exception:
-                    pass
+                page.delete_annot(a)
 
         if redact_rects:
             for r in redact_rects:
@@ -254,7 +256,7 @@ def sample_visual_colors(
 ) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
     """Muestrea los píxeles de la región para detectar color de texto, color de fondo y densidad de trazo."""
     try:
-        pix = page.get_pixmap(clip=bbox, dpi=150)
+        pix = page.get_pixmap(clip=bbox * page.rotation_matrix, dpi=150)
         if pix.width < 2 or pix.height < 2:
             return (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), 0.0
 
@@ -568,7 +570,7 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
     Descarta fondos de página completos, márgenes o contenedores masivos para evitar borrar contenido adyacente."""
     # 1. Búsqueda en trazados vectoriales (PDFs nativos y diagramas)
     candidates = []
-    page_area = page.rect.get_area()
+    page_area = _page_bounds(page).get_area()
     bbox_area = bbox.get_area()
 
     for d in page.get_drawings():
@@ -576,7 +578,7 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
         if r.width < 15.0 or r.height < 12.0:
             continue
         # Descartar estrictamente dibujos de fondo de página, márgenes o lienzos grandes
-        if r.width >= page.rect.width * 0.70 or r.height >= page.rect.height * 0.50:
+        if r.width >= _page_bounds(page).width * 0.70 or r.height >= _page_bounds(page).height * 0.50:
             continue
         if r.get_area() >= page_area * 0.25:
             continue
@@ -591,6 +593,9 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
 
     if candidates:
         return min(candidates, key=lambda c: c.get_area())
+
+    if page.rotation:
+        return None
 
     # 2. Análisis de píxeles para PDFs escaneados o procesados con OCR
     try:
@@ -678,9 +683,9 @@ def replace_text_block(
     # Validación de seguridad: verificar que si se pasa card_border, sea un recuadro pequeño y no el fondo de la página
     if card_border is not None:
         if (
-            card_border.width >= page.rect.width * 0.70
-            or card_border.height >= page.rect.height * 0.50
-            or card_border.get_area() >= page.rect.get_area() * 0.25
+            card_border.width >= _page_bounds(page).width * 0.70
+            or card_border.height >= _page_bounds(page).height * 0.50
+            or card_border.get_area() >= _page_bounds(page).get_area() * 0.25
             or card_border.get_area() > max(bbox.get_area() * 2.5, bbox.get_area() + 2500)
         ):
             card_border = None
@@ -710,8 +715,8 @@ def replace_text_block(
         redact_rect = fitz.Rect(
             max(0.0, bbox.x0 - 1.0),
             max(0.0, bbox.y0 - 1.0),
-            min(page.rect.width, bbox.x1 + 1.0),
-            min(page.rect.height, bbox.y1 + 1.5),
+            min(_page_bounds(page).width, bbox.x1 + 1.0),
+            min(_page_bounds(page).height, bbox.y1 + 1.5),
         )
 
         lines = new_text.splitlines() or [""]
@@ -720,11 +725,11 @@ def replace_text_block(
             default=0.0
         )
         actual_w = max(bbox.width, needed_w + 14.0)
-        actual_w = min(actual_w, page.rect.width - bbox.x0 - 6.0)
+        actual_w = min(actual_w, _page_bounds(page).width - bbox.x0 - 6.0)
 
         line_h = fontsize * 1.35
         needed_h = max(bbox.height, len(lines) * line_h + 6.0)
-        actual_h = min(needed_h, page.rect.height - bbox.y0 - 6.0)
+        actual_h = min(needed_h, _page_bounds(page).height - bbox.y0 - 6.0)
 
         target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y0 + actual_h)
 
@@ -757,8 +762,8 @@ def replace_text_block(
                 expanded = fitz.Rect(
                     target_rect.x0,
                     target_rect.y0,
-                    min(page.rect.width - 6.0, target_rect.x1 + 30.0),
-                    page.rect.height - 6.0,
+                    min(_page_bounds(page).width - 6.0, target_rect.x1 + 30.0),
+                    _page_bounds(page).height - 6.0,
                 )
                 tshape = page.new_shape()
                 rc = tshape.insert_textbox(
@@ -790,8 +795,8 @@ def replace_text_block(
                 expanded = fitz.Rect(
                     target_rect.x0,
                     target_rect.y0,
-                    min(page.rect.width - 6.0, target_rect.x1 + 30.0),
-                    page.rect.height - 6.0,
+                    min(_page_bounds(page).width - 6.0, target_rect.x1 + 30.0),
+                    _page_bounds(page).height - 6.0,
                 )
                 tshape = page.new_shape()
                 rc = tshape.insert_textbox(

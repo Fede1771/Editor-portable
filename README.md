@@ -2,7 +2,7 @@
 
 [![Windows](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
 [![Offline](https://img.shields.io/badge/Seguridad-100%25%20Offline-success)](https://github.com/Fede1771/Editor-portable)
-[![Zero-Trace](https://img.shields.io/badge/Privacidad-Cero%20Huella-blueviolet)](https://github.com/Fede1771/Editor-portable)
+[![Sesión privada](https://img.shields.io/badge/Privacidad-Sesi%C3%B3n%20privada-blueviolet)](https://github.com/Fede1771/Editor-portable)
 [![No Admin](https://img.shields.io/badge/Instalaci%C3%B3n-Sin%20Permisos%20de%20Admin-orange)](https://github.com/Fede1771/Editor-portable)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-brightgreen)](LICENSE)
 
@@ -46,9 +46,9 @@ Hacé clic en el siguiente enlace para descargar la versión completa y lista pa
   - ⚖️ **Legajo Pericial / Siniestros:** Máxima fidelidad en fotos de daños, sellos y firmas periciales (300 DPI, calidad 92%).
 - Subconjunto avanzado de fuentes (`font subsetting`) y compactación de objetos en streams.
 
-### 🛡️ Privacidad Corporativa y Cero Huella (Zero-Trace)
+### 🛡️ Privacidad y sesión privada
 - **Modo Sesión Privada:** Bloquea la escritura de historial y rutas de archivos en el Registro de Windows.
-- **Borrado seguro forense (`Zero-Wipe`):** Los archivos temporales se sobrescriben en disco antes de eliminarse, impidiendo la recuperación de datos confidenciales con herramientas forenses.
+- **Temporales aislados:** El historial de edición permanece en RAM en modo privado. Las conversiones a Word/Office, adjuntos y escáner pueden utilizar disco. Se intenta sobrescribir y limpiar esos temporales; no se garantiza ausencia de rastros ni recuperación imposible, especialmente ante cierres anómalos.
 - **Copia anónima y sanitizada:** Eliminá con un clic nombres de usuario, autores de comentarios, rutas de carpetas y rastros XML/XMP.
 
 ### 🔏 Firmas Digitales y Formularios Interactivos (AcroForms)
@@ -95,7 +95,7 @@ Hacé clic en el siguiente enlace para descargar la versión completa y lista pa
 
 ---
 
-## 🔒 Seguridad y Privacidad Garantizada
+## 🔒 Seguridad y privacidad
 
 - **100% Offline:** No realiza conexiones a internet, no recopila telemetría ni sube información a servidores en la nube. Todo el procesamiento se realiza localmente en tu computadora.
 - **Portabilidad Real:** Podés llevarlo en un pendrive USB o en una carpeta compartida de red corporativa y ejecutarlo directamente sin necesidad de instalar librerías adicionales.

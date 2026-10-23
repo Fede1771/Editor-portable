@@ -21,28 +21,16 @@ from app.viewer import MODE_SINGLE, PdfView, TOOL_HIGHLIGHT, TOOL_SELECT
 # ---------------------------------------------------------------------------
 # H05: run_blocking no debe usar la misma instancia fitz.Document del hilo GUI
 # ---------------------------------------------------------------------------
-def test_h05_run_blocking_isolates_fitz_document_per_thread(qapp):
-    """H05: Cuando se pasa una operación con doc a run_blocking, el hilo trabajador debe usar un clon aislado."""
+def test_h05_pdf_jobs_use_an_independent_process(qapp):
+    """H05/R01: La API usada por la GUI abre sus propios bytes en otro proceso."""
     gui_doc = fitz.open()
     page = gui_doc.new_page(width=200, height=200)
     page.insert_text((30, 50), "THREAD_SAFE_TEXT")
-    gui_doc_id = id(gui_doc)
-    main_thread_id = threading.get_ident()
-
-    observed = {}
-
-    def worker_task():
-        observed["thread_id"] = threading.get_ident()
-        observed["doc_id"] = id(gui_doc)
-        observed["text"] = gui_doc[0].get_text("text").strip()
-        return observed["text"]
-
     parent = QWidget()
-    res = background.run_blocking(parent, "Procesando…", worker_task)
-    assert res == "THREAD_SAFE_TEXT"
-    assert observed["thread_id"] != main_thread_id
-    # La instancia usada dentro del hilo trabajador NO debe ser el mismo objeto gui_doc de la GUI
-    assert observed["doc_id"] != gui_doc_id
+    res = background.run_pdf_job(parent, "Procesando…", "inspect", gui_doc)
+    assert res["text"].strip() == "THREAD_SAFE_TEXT"
+    assert res["pid"] != os.getpid()
+    assert gui_doc[0].get_text().strip() == "THREAD_SAFE_TEXT"
     gui_doc.close()
 
 

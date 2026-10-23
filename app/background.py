@@ -1,98 +1,143 @@
-"""Ejecuta una función lenta en un hilo mostrando un diálogo de espera (la ventana no se congela)."""
+"""Procesos independientes para PDF; hilos sólo para operaciones externas."""
 from __future__ import annotations
 
-from typing import Any
-import pymupdf as fitz
+import multiprocessing
+import os
 from PySide6.QtCore import QEventLoop, Qt, QThread, Signal
 from PySide6.QtWidgets import QProgressDialog
-
-
-def _extract_closure_docs(fn) -> list[tuple[Any, fitz.Document, bytes, str | None]]:
-    """Detecta objetos fitz.Document capturados en el closure de `fn` y los serializa en el hilo GUI (H05)."""
-    captured: list[tuple[Any, fitz.Document, bytes, str | None]] = []
-    cells = getattr(fn, "__closure__", None) or ()
-    for cell in cells:
-        try:
-            val = cell.cell_contents
-        except ValueError:
-            continue
-        if isinstance(val, fitz.Document) and not val.is_closed:
-            pwd = getattr(val, "_editorpdf_password", None)
-            try:
-                raw = val.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP) if pwd else val.tobytes()
-            except Exception:
-                raw = val.tobytes()
-            captured.append((cell, val, raw, pwd))
-    return captured
 
 
 class _Worker(QThread):
     finished_with = Signal(object, object)
 
-    def __init__(self, fn, captured_docs: list[tuple[Any, fitz.Document, bytes, str | None]], parent=None):
+    def __init__(self, fn, parent=None):
         super().__init__(parent)
-        self._fn = fn
-        self._captured_docs = captured_docs
+        self.fn = fn
 
     def run(self):
-        worker_docs: list[tuple[Any, fitz.Document, fitz.Document]] = []
         try:
-            # Abrir instancias independientes de fitz.Document exclusivas del hilo trabajador (H05)
-            for cell, orig_doc, raw, pwd in self._captured_docs:
-                wdoc = fitz.open("pdf", raw)
-                if pwd and wdoc.needs_pass:
-                    wdoc.authenticate(pwd)
-                cell.cell_contents = wdoc
-                worker_docs.append((cell, orig_doc, wdoc))
-
-            res = self._fn()
-            # Si el trabajador devuelve un fitz.Document nuevo, serializarlo para reabrirlo en el hilo GUI
-            if isinstance(res, fitz.Document) and not res.is_closed:
-                res_bytes = res.tobytes()
-                res.close()
-                self.finished_with.emit(("__fitz_doc_bytes__", res_bytes), None)
-            else:
-                self.finished_with.emit(res, None)
-        except Exception as exc:  # noqa: BLE001
+            self.finished_with.emit(self.fn(), None)
+        except Exception as exc:
             self.finished_with.emit(None, exc)
-        finally:
-            for cell, orig_doc, wdoc in worker_docs:
-                try:
-                    cell.cell_contents = orig_doc
-                except Exception:
-                    pass
-                try:
-                    if not wdoc.is_closed:
-                        wdoc.close()
-                except Exception:
-                    pass
 
 
-def run_blocking(parent, text: str, fn):
-    """Ejecuta `fn()` en segundo plano aislando cualquier `fitz.Document` capturado para evitar acceso concurrente (H05)."""
-    captured_docs = _extract_closure_docs(fn)
+def _dialog(parent, text):
     dlg = QProgressDialog(text, None, 0, 0, parent)
     dlg.setWindowTitle("Un momento…")
-    dlg.setWindowModality(Qt.WindowModal)
+    dlg.setWindowModality(Qt.ApplicationModal)
     dlg.setCancelButton(None)
     dlg.setMinimumDuration(0)
     dlg.show()
-    loop = QEventLoop()
-    box: dict = {}
-    worker = _Worker(fn, captured_docs, parent)
+    return dlg
 
-    def _done(result, error):
-        box["result"], box["error"] = result, error
+
+def run_blocking(parent, text: str, fn):
+    """Office/escáner: no pasar objetos ni funciones que usen PyMuPDF."""
+    dlg = _dialog(parent, text)
+    loop = QEventLoop()
+    box = {}
+    worker = _Worker(fn, parent)
+
+    def done(result, error):
+        box.update(result=result, error=error)
         loop.quit()
 
-    worker.finished_with.connect(_done)
+    worker.finished_with.connect(done)
     worker.start()
     loop.exec()
     worker.wait()
     dlg.close()
     if box.get("error") is not None:
         raise box["error"]
-    res = box.get("result")
-    if isinstance(res, tuple) and len(res) == 2 and res[0] == "__fitz_doc_bytes__":
-        return fitz.open("pdf", res[1])
-    return res
+    return box.get("result")
+
+
+def _pdf_process(conn, operation, raw, password, private_mode, args, kwargs):
+    """Entrada serializable de spawn: PyMuPDF corre en el hilo principal hijo."""
+    from .document_io import open_pdf, serialize_pdf
+    from . import privacy
+    from .privacy import TempManager
+    privacy._SESSION_PRIVATE_MODE = private_mode
+    doc = None
+    try:
+        doc = open_pdf(raw, password)
+        if operation == "ocr":
+            from .ocr import ocr_document
+            result_doc = ocr_document(doc, *args, **kwargs)
+            try:
+                result = {"pdf": serialize_pdf(result_doc), "ocr": result_doc._editorpdf_ocr_report}
+            finally:
+                result_doc.close()
+        elif operation == "optimize":
+            from .optimizer import optimize_document
+            result = optimize_document(doc, *args, **kwargs)
+        elif operation in {"word", "excel", "images"}:
+            from . import conversion
+            target = {"word": conversion.convert_to_word, "excel": conversion.convert_to_excel,
+                      "images": conversion.convert_to_images}[operation]
+            result = target(doc, *args, **kwargs)
+        elif operation == "inspect":
+            result = {"pid": os.getpid(), "text": "".join(p.get_text() for p in doc),
+                      "encryption": doc.metadata.get("encryption"), "private_mode": privacy.is_private_mode()}
+        else:
+            raise ValueError("Trabajo PDF desconocido.")
+        packet = (result, None)
+    except Exception as exc:
+        packet = (None, f"{type(exc).__name__}: {exc}")
+    finally:
+        if doc is not None:
+            doc.close()
+        TempManager.cleanup_all()
+        try:
+            conn.send(packet)
+        finally:
+            conn.close()
+
+
+def run_pdf_job(parent, text: str, operation: str, doc, *args, **kwargs):
+    """Enviar bytes cifrados y parámetros; nunca closures ni objetos Qt."""
+    from .document_io import open_pdf, serialize_pdf
+    raw = serialize_pdf(doc)
+    password = getattr(doc, "_editorpdf_password", None)
+    from .privacy import is_private_mode
+    context = multiprocessing.get_context("spawn")
+    receive, send = context.Pipe(duplex=False)
+    process = context.Process(target=_pdf_process, args=(send, operation, raw, password, is_private_mode(), args, kwargs))
+    dlg = _dialog(parent, text)
+    loop = QEventLoop()
+    box = {}
+    receiver = _Worker(lambda: receive.recv(), parent)
+
+    def received(packet, error):
+        if error is not None:
+            box["error"] = "El proceso PDF terminó sin devolver un resultado completo."
+        else:
+            box["result"], box["error"] = packet
+        loop.quit()
+
+    try:
+        process.start()
+        send.close()
+        # El hilo sólo recibe bytes; no toca Document ni la GUI. Un PDF grande no bloquea recv en Qt.
+        receiver.finished_with.connect(received)
+        receiver.start()
+        loop.exec()
+        if box.get("error"):
+            raise RuntimeError(box["error"])
+        result = box.get("result")
+        if operation == "ocr":
+            output = open_pdf(result["pdf"], password)
+            output._editorpdf_ocr_report = result["ocr"]
+            return output
+        return result
+    finally:
+        if process.pid is not None:
+            process.join(timeout=5)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+            process.close()
+        receiver.wait()
+        receive.close()
+        send.close()
+        dlg.close()

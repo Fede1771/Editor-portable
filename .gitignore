@@ -19,6 +19,8 @@ dist/
 Thumbs.db
 Desktop.ini
 .pytest_cache/
+tests/temp_output/
+diagnostico_runtime/
 data/lo_profile/
 
 # Informes locales de auditoría (no subir al repositorio)

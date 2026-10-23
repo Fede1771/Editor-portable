@@ -3,6 +3,11 @@ import os
 from pathlib import Path
 import sys
 import warnings
+import multiprocessing
+
+# Antes de cargar Qt/splash: PyInstaller despacha aquí los procesos PDF de spawn.
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
 # Suprimir advertencia transitoria de la API clásica de PyMuPDF
 warnings.filterwarnings("ignore", category=FutureWarning, module=r"fitz(\..*)?")
@@ -30,6 +35,8 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Editor PDF Portable")
+    from app.privacy import TempManager
+    TempManager.sweep_orphaned_temps()
 
     icon_candidates = [
         Path(sys.executable).parent / "_internal" / "data" / "app_icon.png" if getattr(sys, "frozen", False) else None,
@@ -52,6 +59,7 @@ def main() -> int:
     except ImportError:
         pass
 
+    os.environ["PYINSTALLER_SUPPRESS_SPLASH_SCREEN"] = "1"
     for path in sys.argv[1:]:
         if path.lower().endswith(".pdf"):
             window.open_file(path)
@@ -59,4 +67,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        os.environ["PYINSTALLER_SUPPRESS_SPLASH_SCREEN"] = "1"
+        try:
+            pyi_splash.close()
+        except (NameError, RuntimeError):
+            pass
+        from app.diagnostics import self_test
+        sys.exit(self_test(sys.argv[2]))
     sys.exit(main())

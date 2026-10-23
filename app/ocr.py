@@ -48,13 +48,6 @@ def get_available_languages() -> dict[str, str]:
     return available
 
 
-def _insert_pixmap_as_pdf_page(out_doc: fitz.Document, page_rect: fitz.Rect, pix: fitz.Pixmap) -> None:
-    """Inserta una página visualmente idéntica a partir de un Pixmap usando operaciones PDF válidas (H31)."""
-    new_pg = out_doc.new_page(width=page_rect.width, height=page_rect.height)
-    png_bytes = pix.tobytes("png")
-    new_pg.insert_image(new_pg.rect, stream=png_bytes)
-
-
 def ocr_document(
     doc: fitz.Document,
     language: str = "spa",
@@ -63,37 +56,42 @@ def ocr_document(
     progress_callback: Callable[[int, int], bool] | None = None,
 ) -> fitz.Document:
     """Aplica OCR sobre las páginas indicadas y devuelve un nuevo documento con texto buscable (H31)."""
+    from .document_io import selected_copy
     target_pages = list(pages) if pages is not None else list(range(doc.page_count))
     total = len(target_pages)
-    out_doc = fitz.open()
-
+    out_doc = selected_copy(doc, target_pages)
+    report = {"recognized": [], "failed": [], "fallback_language": []}
     try:
         for idx, pno in enumerate(target_pages):
             if progress_callback and not progress_callback(idx + 1, total):
                 raise InterruptedError("Operación de OCR cancelada por el usuario.")
-
-            page = doc[pno]
-            pix = page.get_pixmap(dpi=dpi, alpha=False)
+            pix = doc[pno].get_pixmap(dpi=dpi, alpha=False)
+            languages = [language]
+            if language != "eng" and os.path.isfile(os.path.join(TESSDATA_DIR, "eng.traineddata")):
+                languages.append("eng")
             inserted = False
-            try:
-                ocr_bytes = pix.pdfocr_tobytes(language=language, tessdata=TESSDATA_DIR)
-                with fitz.open("pdf", ocr_bytes) as ocr_page_doc:
-                    out_doc.insert_pdf(ocr_page_doc)
-                inserted = True
-            except Exception:
-                if language != "eng" and os.path.isfile(os.path.join(TESSDATA_DIR, "eng.traineddata")):
-                    try:
-                        ocr_bytes = pix.pdfocr_tobytes(language="eng", tessdata=TESSDATA_DIR)
-                        with fitz.open("pdf", ocr_bytes) as ocr_page_doc:
-                            out_doc.insert_pdf(ocr_page_doc)
-                        inserted = True
-                    except Exception:
-                        inserted = False
-
+            error = ""
+            for candidate in languages:
+                try:
+                    data = pix.pdfocr_tobytes(language=candidate, tessdata=TESSDATA_DIR)
+                    with fitz.open("pdf", data) as recognized:
+                        if not any(p.get_text().strip() for p in recognized):
+                            raise ValueError("El motor no reconoció texto en esta página.")
+                        out_doc.insert_pdf(recognized, start_at=idx)
+                        out_doc.delete_page(idx + 1)
+                    report["recognized"].append(pno + 1)
+                    if candidate != language:
+                        report["fallback_language"].append(pno + 1)
+                    inserted = True
+                    break
+                except Exception as exc:
+                    error = str(exc)
             if not inserted:
-                _insert_pixmap_as_pdf_page(out_doc, page.rect, pix)
+                # Conservar página original, texto, geometría y datos; no rasterizar como falso éxito.
+                report["failed"].append({"page": pno + 1, "error": error})
+        report["status"] = "failed" if not report["recognized"] else ("partial" if report["failed"] else "success")
+        out_doc._editorpdf_ocr_report = report
     except Exception:
         out_doc.close()
         raise
-
     return out_doc

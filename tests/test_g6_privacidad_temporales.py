@@ -57,20 +57,30 @@ def test_h26_temp_manager_keeps_locked_file_registered_and_accurate_count(tmp_pa
 def test_h26_sweep_orphaned_temps_skips_active_pid(tmp_path, monkeypatch):
     """H26: sweep_orphaned_temps no debe borrar temporales pertenecientes a un PID activo."""
     monkeypatch.setattr(privacy.tempfile, "gettempdir", lambda: str(tmp_path))
-    active_dir = tmp_path / f"editorpdf_p{os.getpid()}_active"
+    import json, time
+    root = tmp_path / "EditorPDFPortable"
+    root.mkdir()
+    active_dir = root / f"editorpdf_p{os.getpid()}_active"
     active_dir.mkdir()
     active_file = active_dir / "work.tmp"
     active_file.write_bytes(b"ACTIVE_WORK")
 
-    dead_dir = tmp_path / "editorpdf_p99999999_dead"
+    dead_dir = root / "editorpdf_p99999999_dead"
     dead_dir.mkdir()
     (dead_dir / "old.tmp").write_bytes(b"ORPHAN_WORK")
+    for folder, pid in ((active_dir, os.getpid()), (dead_dir, 99999999)):
+        (root / (folder.name + ".owner.json")).write_text(json.dumps({
+            "app": privacy._OWNER_TAG, "pid": pid, "created": time.time() - 90000,
+        }))
+    unowned = root / "editorpdf_p99999999_not_ours"
+    unowned.mkdir()
 
     swept = TempManager.sweep_orphaned_temps()
     assert swept >= 1
     assert not dead_dir.exists()
     assert active_dir.exists()
     assert active_file.read_bytes() == b"ACTIVE_WORK"
+    assert unowned.exists(), "No borrar carpetas desconocidas por su nombre"
 
 
 # ---------------------------------------------------------------------------
