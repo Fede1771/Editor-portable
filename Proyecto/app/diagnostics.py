@@ -11,7 +11,7 @@ import traceback
 def self_test(output_dir: str) -> int:
     import pymupdf as fitz
     from PySide6.QtWidgets import QApplication
-    from .background import run_pdf_job
+    from .background import run_pdf_job, run_blocking
     from .document_io import open_pdf
     from .main_window import MainWindow
     from .privacy import TempManager
@@ -38,6 +38,13 @@ def self_test(output_dir: str) -> int:
             run_pdf_job(win, "Verificando exportación…", operation, doc, str(output))
             assert output.stat().st_size > 0
             result["checks"][operation] = True
+        from .creation import office_to_pdf_file
+        for name, filename in (("word", "export.docx"), ("excel", "export.xlsx")):
+            output = run_blocking(win, "Verificando Microsoft 365…",
+                                  lambda f=filename: office_to_pdf_file(str(work / f), str(work / "office_pdf")))
+            with fitz.open(output) as check:
+                assert check.page_count and "PORTABLE_RUNTIME_CHECK" in "".join(p.get_text() for p in check)
+            result["checks"]["office_to_pdf_" + name] = True
         files = run_pdf_job(win, "Verificando imágenes…", "images", doc, str(work / "images"), dpi=72)
         assert len(files) == 1 and Path(files[0]).is_file()
         result["checks"]["images"] = True

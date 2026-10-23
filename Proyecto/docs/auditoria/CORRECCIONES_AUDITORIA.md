@@ -64,7 +64,7 @@ $env:PYINSTALLER_SUPPRESS_SPLASH_SCREEN = '1'
 ..\Programa\EditorPDFPortable\EditorPDFPortable.exe --self-test .\diagnostico_runtime
 ```
 
-El resultado se escribe en `self_test_result.json`. La prueba crea documentos sintéticos, usa preferencias aisladas y comprueba procesos independientes, Word, Excel, imágenes, compresión cifrada y OCR. Los archivos de diagnóstico se pueden eliminar después de revisar el resultado. Esta comprobación no requiere Microsoft Office, escáner ni impresora.
+El resultado se escribe en `self_test_result.json`. La prueba crea documentos sintéticos, usa preferencias aisladas y comprueba procesos independientes, exportación a Word y Excel, retorno de ambos formatos a PDF, imágenes, compresión cifrada y OCR. Los archivos de diagnóstico se pueden eliminar después de revisar el resultado. Desde la integración con Microsoft 365, requiere Word y Excel de escritorio instalados y activados. No requiere escáner ni impresora.
 
 Validación de A01–A07 del 23/10/2026: **166 pruebas aprobadas, proceso terminado con código 0** (136 anteriores y 30 regresiones en `tests/test_correcciones_a01_a07.py`). Las 136 pruebas originales también se ejecutaron por separado con salida 0. La autoprueba del portable de esa revisión aprobó **6/6 comprobaciones, salida 0**, incluyendo OCR cifrado guardado y reabierto con geometría y texto verificados. `pip check` no encontró dependencias incompatibles. La advertencia de deprecación de `fitz` dentro de `pdf2docx` permanece. Las dependencias no se cambiaron; la consulta OSV de la reauditoría devolvió cero avisos para los 40 paquetes del lock, sin certificar ausencia de vulnerabilidades.
 
@@ -96,6 +96,14 @@ La censura de un campo terminal compartido requiere incluir todas las páginas q
 
 El EXE y ZIP se regeneraron después de C01–C04. La autoprueba de ese ejecutable aprobó **6/6 comprobaciones con salida 0**: procesos independientes, Word, Excel, imágenes, compresión cifrada y OCR. El ZIP incluye el mismo EXE probado (comparación SHA-256). Las 27 regresiones específicas se ejecutan desde Python; la autoprueba empaquetada es una comprobación de integración y no sustituye esa suite.
 
+
+## Integración posterior con Microsoft 365
+
+El 23/10/2026 se reemplazó LibreOffice por la automatización local de Microsoft 365 para Office → PDF. PDF → Excel utiliza Power Query; PDF → Word reconstruye un DOCX intermedio con pdf2docx y Word genera el archivo final. La [guía técnica](../MICROSOFT365.md) detalla el aislamiento de procesos, la escritura atómica y las limitaciones.
+
+Validación de esta integración: **204 pruebas aprobadas, salida 0**, incluyendo 11 casos nuevos de rutas nativas, preservación del destino ante fallos, snapshot de cambios sin guardar, fórmulas como texto, timeout, identidad de procesos, escape de Power Query, PowerPoint ya abierto y exclusión mutua. El ejecutable regenerado aprobó **8/8 comprobaciones, salida 0**. Las cinco rutas también se probaron con las aplicaciones reales de Microsoft 365; se reabrieron sus resultados con lectores independientes. El XLSX de prueba no conserva fórmulas, consultas, conexiones ni enlaces externos. El ZIP incluye el mismo EXE validado mediante SHA-256.
+
+`pip check` terminó sin incompatibilidades. OSV no devolvió avisos para las **41 versiones** del lock el 23/10/2026. Los resultados de 40 paquetes y 6 comprobaciones descritos en secciones anteriores corresponden a revisiones históricas. Esta validación no sustituye pruebas con los documentos y las políticas de Microsoft 365 de cada organización.
 
 ## Alcance de seguridad
 

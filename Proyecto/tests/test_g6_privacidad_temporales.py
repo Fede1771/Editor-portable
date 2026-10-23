@@ -1,8 +1,9 @@
-"""Pruebas del Grupo 6: Privacidad, limpieza de temporales, modo privado, portapapeles y perfil LibreOffice.
+"""Pruebas del Grupo 6: Privacidad, temporales, portapapeles y automatización Office aislada.
 Cubre: H26, H27, H46, H47.
 """
 from __future__ import annotations
 
+from pathlib import Path
 import os
 import subprocess
 import pymupdf as fitz
@@ -84,43 +85,27 @@ def test_h26_sweep_orphaned_temps_skips_active_pid(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# H27: Perfil LibreOffice temporal y aislado fuera de DATA_DIR
+# H27: Salida Office temporal y aislada fuera de DATA_DIR
 # ---------------------------------------------------------------------------
-def test_h27_office_conversion_uses_isolated_temp_profile_not_data_dir(tmp_path, monkeypatch):
-    """H27: office_to_pdf_file debe usar un perfil temporal aislado en vez de DATA_DIR/lo_profile."""
-    captured_cmds: list[list[str]] = []
-
-    monkeypatch.setattr(creation, "find_soffice", lambda: "C:/fake/soffice.exe")
-
-    def fake_run(cmd, *args, **kwargs):
-        captured_cmds.append(list(cmd))
-        # Simular creación del PDF de salida en --outdir
-        out_idx = cmd.index("--outdir") + 1
-        out_dir = cmd[out_idx]
-        src_path = cmd[-1]
-        out_pdf = os.path.join(out_dir, os.path.splitext(os.path.basename(src_path))[0] + ".pdf")
-        doc = fitz.open()
-        doc.new_page()
-        doc.save(out_pdf)
-        doc.close()
-        return subprocess.CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(creation.subprocess, "run", fake_run)
-
-    dummy_docx = tmp_path / "documento.docx"
-    dummy_docx.write_bytes(b"DUMMY")
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-
-    res_pdf = creation.office_to_pdf_file(str(dummy_docx), str(out_dir))
-    assert os.path.isfile(res_pdf)
-    assert len(captured_cmds) == 1
-
-    env_args = [a for a in captured_cmds[0] if a.startswith("-env:UserInstallation=")]
-    assert len(env_args) == 1
-    profile_uri = env_args[0].split("=", 1)[1]
-    # No debe apuntar a DATA_DIR/lo_profile
-    assert "lo_profile" not in profile_uri or creation.DATA_DIR.replace("\\", "/") not in profile_uri
+def test_h27_office_conversion_uses_isolated_output_and_preserves_source(tmp_path, monkeypatch):
+    """Office recibe una salida temporal aislada y no modifica el archivo fuente."""
+    from app import office365
+    calls = []
+    def fake_run(operation, source, target, **kwargs):
+        calls.append((operation, source, target))
+        assert Path(target).parent == tmp_path / "out"
+        assert target.endswith(".tmp.pdf")
+        with fitz.open() as document:
+            document.new_page()
+            document.save(target)
+    monkeypatch.setattr(office365, "run_office", fake_run)
+    source = tmp_path / "documento.docx"
+    source.write_bytes(b"DUMMY")
+    output = creation.office_to_pdf_file(str(source), str(tmp_path / "out"))
+    assert os.path.isfile(output)
+    assert source.read_bytes() == b"DUMMY"
+    assert len(calls) == 1 and calls[0][0] == "word_pdf"
+    assert not Path(calls[0][2]).exists()
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,10 @@
-"""Crear PDF (fase 3): imágenes, Office (LibreOffice), HTML/texto, combinar y escáner."""
+"""Crear PDF (fase 3): imágenes, Office (Microsoft 365), HTML/texto, combinar y escáner."""
 from __future__ import annotations
 
 import html as html_lib
 import io
 import os
 import pathlib
-import shutil
 import subprocess
 import tempfile
 import sys
@@ -178,41 +177,32 @@ def htmlfile_to_pdf(path: str) -> fitz.Document:
 
 
 # ----------------------------------------------------------------------- Office
-def find_soffice() -> str | None:
-    found = shutil.which("soffice")
-    if found:
-        return found
-    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), r"C:\Program Files"):
-        if base:
-            cand = os.path.join(base, "LibreOffice", "program", "soffice.exe")
-            if os.path.isfile(cand):
-                return cand
-    return None
-
-
 def office_to_pdf_file(path: str, out_dir: str, timeout: int = 240) -> str:
-    """Convierte con LibreOffice usando un perfil temporal aislado por conversión (H27)."""
-    from .privacy import TempManager
-
-    soffice = find_soffice()
-    if not soffice:
-        raise RuntimeError("No se encontró LibreOffice. Instalalo para convertir documentos de Office.")
-    profile = TempManager.create_temp_dir(prefix="editorpdf_lo_profile_")
-    try:
-        profile_url = pathlib.Path(profile).as_uri()      # codifica espacios y acentos de la ruta
-        cmd = [soffice, "--headless", "--norestore", "--nolockcheck", f"-env:UserInstallation={profile_url}",
-               "--convert-to", "pdf", "--outdir", out_dir, path]
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=flags, check=False)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"LibreOffice tardó demasiado en convertir «{os.path.basename(path)}».") from exc
-        out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
-        if not os.path.isfile(out):
-            raise RuntimeError(f"LibreOffice no pudo convertir «{os.path.basename(path)}».")
-        return out
-    finally:
-        TempManager.cleanup_path(profile)
+    """Exporta con Word, Excel o PowerPoint de Microsoft 365; salida atómica."""
+    from .office365 import run_office
+    from .conversion import _atomic_write_target
+    extension = pathlib.Path(path).suffix.lower()
+    if extension in {".doc", ".docx", ".odt", ".rtf"}:
+        operation = "word_pdf"
+    elif extension in {".xls", ".xlsx", ".ods"}:
+        operation = "excel_pdf"
+    elif extension in {".ppt", ".pptx", ".odp"}:
+        operation = "powerpoint_pdf"
+    else:
+        raise ValueError("Formato de Office no compatible.")
+    os.makedirs(out_dir, exist_ok=True)
+    output = os.path.join(out_dir, pathlib.Path(path).stem + ".pdf")
+    def verify(target):
+        # Office se ejecuta desde un hilo receptor; no usar PyMuPDF en él.
+        # El archivo queda cerrado incluso si el parser rechaza una salida rota.
+        from pypdf import PdfReader
+        with open(target, "rb") as stream:
+            check = PdfReader(stream, strict=True)
+            if check.is_encrypted or len(check.pages) < 1:
+                raise ValueError("Microsoft 365 no generó un PDF válido.")
+    _atomic_write_target(output, ".tmp.pdf",
+                         lambda target: run_office(operation, path, target, timeout=timeout), verify)
+    return output
 
 
 def convert_office_files(paths: list[str], out_dir: str) -> dict[str, str]:

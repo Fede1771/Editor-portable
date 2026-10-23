@@ -60,78 +60,64 @@ def _append_literal_row(ws, values: Sequence[object | None], next_row_idx: int) 
     return next_row_idx + 1
 
 
-def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None = None) -> None:
-    """Convierte el documento PDF en vivo a Microsoft Word (.docx) de forma atómica (H12, H26, V07)."""
-    from pdf2docx import Converter
-    from .privacy import TempManager
+def _verify_docx(path: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        if archive.testzip() is not None or not {"[Content_Types].xml", "word/document.xml"} <= set(archive.namelist()):
+            raise ValueError("Microsoft Word no generó un documento OOXML válido.")
 
-    fd, temp_pdf = TempManager.create_temp_file(prefix="pdf_word_", suffix=".pdf")
-    os.close(fd)
+
+def _verify_xlsx(path: str) -> None:
+    import openpyxl
+    book = openpyxl.load_workbook(path, read_only=True, data_only=False)
     try:
-        # pdf2docx necesita un PDF accesible sin contraseña. Temporal aislado y limpieza en finally.
-        doc.save(temp_pdf, garbage=3, deflate=True)
-
-        def _write_docx(temp_docx: str) -> None:
-            cv = Converter(temp_pdf)
-            try:
-                cv.convert(temp_docx)
-            finally:
-                cv.close()
-
-        def _verify_docx(temp_docx: str) -> None:
-            if not zipfile.is_zipfile(temp_docx):
-                raise ValueError("El archivo .docx generado no es un contenedor OOXML válido.")
-
-        _atomic_write_target(out_docx_path, ".tmp.docx", _write_docx, _verify_docx)
+        if not book.sheetnames:
+            raise ValueError("Microsoft Excel no generó hojas válidas.")
+        if any(cell.data_type == "f" for sheet in book for row in sheet for cell in row):
+            raise ValueError("La exportación del PDF debe contener texto literal, no fórmulas.")
     finally:
+        book.close()
+
+
+def _office_export(doc, target, operation, suffix, verifier):
+    from .office365 import run_office
+    from .privacy import TempManager
+    fd, temp_pdf = TempManager.create_temp_file(prefix="pdf_office_", suffix=".pdf")
+    os.close(fd)
+    result = None
+    intermediate = None
+    try:
+        # Copia única del documento en vivo; no se abre ni modifica el original.
+        doc.save(temp_pdf, garbage=3, deflate=True)
+        source = temp_pdf
+        if operation == "word_docx":
+            from pdf2docx import Converter
+            intermediate = TempManager.create_temp_dir(prefix="word_structure_")
+            source = os.path.join(intermediate, "structure.docx")
+            converter = Converter(temp_pdf)
+            try:
+                converter.convert(source)
+            finally:
+                converter.close()
+            _verify_docx(source)
+        def write(output):
+            nonlocal result
+            result = run_office(operation, source, output)
+        _atomic_write_target(target, suffix, write, verifier)
+        return result
+    finally:
+        if intermediate is not None:
+            TempManager.cleanup_path(intermediate)
         TempManager.cleanup_path(temp_pdf)
 
 
+def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None = None) -> None:
+    """Reconstruye el PDF y Microsoft Word de escritorio guarda el DOCX final verificado."""
+    _office_export(doc, out_docx_path, "word_docx", ".tmp.docx", _verify_docx)
+
+
 def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
-    """Extrae tablas del PDF y las guarda en un libro de Microsoft Excel (.xlsx) como texto literal (H20, N05, V07).
-
-    Retorna la cantidad total de tablas extraídas.
-    """
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    default_sheet = wb.active
-
-    total_tables = 0
-    for pno in range(doc.page_count):
-        page = doc[pno]
-        tabs = page.find_tables()
-        for t_idx, table in enumerate(tabs):
-            total_tables += 1
-            sheet_title = f"Pág {pno + 1} Tab {t_idx + 1}"[:31]
-            ws = wb.create_sheet(title=sheet_title)
-            row_idx = 1
-            for row in table.extract():
-                row_idx = _append_literal_row(ws, row, row_idx)
-
-    # Si no se detectaron tablas tabuladas estructuradas, exportar líneas de texto por renglón
-    if total_tables == 0:
-        ws = wb.create_sheet(title="Contenido Texto")
-        row_idx = 1
-        for pno in range(doc.page_count):
-            row_idx = _append_literal_row(ws, [f"--- PÁGINA {pno + 1} ---"], row_idx)
-            for line in doc[pno].get_text("text").splitlines():
-                if line.strip():
-                    row_idx = _append_literal_row(ws, [line.strip()], row_idx)
-
-    if len(wb.sheetnames) > 1 and default_sheet in wb.worksheets:
-        wb.remove(default_sheet)
-
-    def _verify_xlsx(temp_xlsx: str) -> None:
-        check_wb = openpyxl.load_workbook(temp_xlsx, read_only=True)
-        try:
-            if not check_wb.sheetnames:
-                raise ValueError("El libro .xlsx generado no contiene hojas válidas.")
-        finally:
-            check_wb.close()
-
-    _atomic_write_target(out_xlsx_path, ".tmp.xlsx", wb.save, _verify_xlsx)
-    return total_tables
+    """Excel/Power Query importa el PDF; el XLSX final contiene valores de texto."""
+    return _office_export(doc, out_xlsx_path, "pdf_excel", ".tmp.xlsx", _verify_xlsx)
 
 
 def convert_to_images(

@@ -375,12 +375,13 @@ def test_v07_convert_to_excel_atomic_preserves_existing_file_on_io_error(tmp_pat
     p = doc.new_page()
     p.insert_text((72, 72), "Linea 1\nLinea 2")
 
-    def failing_save(self, filename):
+    def failing_save(operation, source, filename):
         with open(filename, "wb") as f:
             f.write(b"partial-corrupt")
         raise OSError("disk full while writing xlsx")
 
-    monkeypatch.setattr(openpyxl.Workbook, "save", failing_save)
+    from app import office365
+    monkeypatch.setattr(office365, "run_office", failing_save)
 
     with pytest.raises(OSError, match="disk full"):
         conversion.convert_to_excel(doc, str(out_xlsx))

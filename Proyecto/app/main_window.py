@@ -1385,7 +1385,7 @@ class MainWindow(QMainWindow):
             converted: dict[str, str] = {}
             if office:
                 converted = run_blocking(
-                    self, "Convirtiendo documentos de Office con LibreOffice…\n(la primera vez puede tardar)",
+                    self, "Convirtiendo documentos con Microsoft 365…\n(la primera vez puede tardar)",
                     lambda: creation.convert_office_files(office, tmp))
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
