@@ -82,7 +82,8 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_toolbar()
-        self._build_menu()
+        self._register_shortcuts()
+        self.menuBar().setVisible(False)
         self.status_pages = QLabel("")
         self.status_msg = QLabel("Abrí un PDF con Ctrl+O o arrastralo a la ventana")
         self.statusBar().addWidget(self.status_msg, 1)
@@ -254,7 +255,16 @@ class MainWindow(QMainWindow):
         """)
         self.addToolBar(tb)
 
-        # Grupo 1: Documento y Compresión
+        # Botón Menú Principal (☰ Menú)
+        self.btn_main = QToolButton()
+        self.btn_main.setText("☰ Menú ▾")
+        self.btn_main.setToolTip("Menú principal y herramientas completas")
+        self.btn_main.setPopupMode(QToolButton.InstantPopup)
+        self.btn_main.setMenu(self._build_main_dropdown_menu())
+        tb.addWidget(self.btn_main)
+        tb.addSeparator()
+
+        # Grupo 1: Acciones directas frecuentes
         tb.addAction(self.a_open)
         tb.addAction(self.a_save)
         tb.addAction(self.a_compress)
@@ -321,82 +331,72 @@ class MainWindow(QMainWindow):
         tb.addAction(self.a_side)
         tb.addAction(self.a_find)
 
-    def _build_menu(self):
-        mb = self.menuBar()
-        m = mb.addMenu("&Archivo")
-        m.addAction(self.a_open)
-        self.menu_recents = m.addMenu("Abrir &recientes")
+    def _build_main_dropdown_menu(self) -> QMenu:
+        menu = QMenu(self)
+
+        # Acciones de Archivo
+        menu.addAction(self.a_open)
+        self.menu_recents = menu.addMenu("🕒 Documentos recientes")
         self._update_recent_menu()
-        sub = m.addMenu("&Crear PDF")
+
+        sub_create = menu.addMenu("📄 Crear PDF")
         for a in (self.a_new_files, self.a_combine, self.a_clip, self.a_scan, self.a_blank_doc):
-            sub.addAction(a)
-        sub_export = m.addMenu("&Exportar / Convertir a…")
+            sub_create.addAction(a)
+
+        menu.addSeparator()
+        menu.addAction(self.a_save)
+        menu.addAction(self.a_save_as)
+        menu.addAction(self.a_compress)
+        menu.addAction(self.a_save_sanitized)
+        menu.addAction(self.a_print)
+
+        menu.addSeparator()
+
+        # Páginas
+        sub_pages = menu.addMenu("📑 Páginas")
+        self._fill_pages_menu(sub_pages, full=True)
+
+        # Herramientas
+        sub_tools = menu.addMenu("🛠️ Herramientas")
+        sub_tools.addAction(self.a_ocr)
+        sub_tools.addAction(self.a_fill_forms)
+        sub_tools.addAction(self.a_flatten_forms)
+        sub_tools.addAction(self.a_attachments)
+        sub_tools.addSeparator()
+        sub_tools.addAction(self.a_find_redact)
+        sub_tools.addAction(self.a_extract_imgs)
+
+        # Exportar
+        sub_export = menu.addMenu("📤 Exportar / Convertir a…")
         for a in (self.a_export_word, self.a_export_excel, self.a_export_images, self.a_export_text, self.a_export_html):
             sub_export.addAction(a)
-        m.addSeparator()
-        m.addAction(self.a_save)
-        m.addAction(self.a_save_as)
-        m.addAction(self.a_compress)
-        m.addAction(self.a_save_sanitized)
-        m.addAction(self.a_print)
-        m.addSeparator()
-        m.addAction(self.a_private_mode)
-        m.addAction(self.a_clear_privacy)
-        m.addSeparator()
-        for a in (self.a_close, self.a_quit):
-            m.addAction(a)
 
-        m = mb.addMenu("&Edición")
-        m.addAction(self.a_undo)
-        m.addAction(self.a_redo)
-        m.addSeparator()
-        m.addAction(self.a_find)
-        m.addAction(self.a_find_next)
-        m.addAction(self.a_find_prev)
-        m.addSeparator()
-        m.addAction(self.a_tool_select)
-        m.addAction(self.a_tool_text)
-        m.addAction(self.a_tool_redact)
-        m.addAction(self.a_find_redact)
-        m.addSeparator()
-        m.addAction(self.a_tool_image)
-        m.addAction(self.a_extract_imgs)
-        m.addAction(self.a_tool_link)
-
-        m = mb.addMenu("&Ver")
-        for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p):
-            m.addAction(a)
-        m.addSeparator()
-        sub_mode = m.addMenu("Modo de visualización")
+        # Visualización
+        sub_view = menu.addMenu("👁️ Visualización")
+        sub_mode = sub_view.addMenu("Modo de lectura")
         sub_mode.addAction("Continuo", lambda: self._view_do("set_mode", MODE_CONTINUOUS))
         sub_mode.addAction("Una página", lambda: self._view_do("set_mode", MODE_SINGLE))
         sub_mode.addAction("Dos páginas", lambda: self._view_do("set_mode", MODE_TWO))
-        m.addSeparator()
-        m.addAction(self.a_rot_l)
-        m.addAction(self.a_rot_r)
-        m.addSeparator()
-        m.addAction(self.a_side)
+        sub_view.addSeparator()
+        sub_view.addAction(self.a_rot_l)
+        sub_view.addAction(self.a_rot_r)
+        sub_view.addAction(self.a_side)
 
-        m = mb.addMenu("&Páginas")
-        self._fill_pages_menu(m, full=True)
+        menu.addSeparator()
 
-        m = mb.addMenu("&Herramientas")
-        m.addAction(self.a_ocr)
-        m.addAction(self.a_optimize)
-        m.addAction(self.a_attachments)
-        m.addSeparator()
-        m.addAction(self.a_find_redact)
-        m.addAction(self.a_extract_imgs)
+        # Privacidad
+        menu.addAction(self.a_private_mode)
+        menu.addAction(self.a_clear_privacy)
 
-        m = mb.addMenu("&Anotaciones")
-        m.addAction(self.a_tool_pen)
-        m.addAction(self.a_tool_note)
-        m.addAction(self.a_tool_link)
+        menu.addSeparator()
 
-        m = mb.addMenu("&Formularios")
-        m.addAction(self.a_fill_forms)
-        m.addAction(self.a_flatten_forms)
+        # Salir
+        menu.addAction(self.a_close)
+        menu.addAction(self.a_quit)
 
+        return menu
+
+    def _register_shortcuts(self):
         # Atajos válidos aunque el menú no tenga el foco
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_side, self.a_find, self.a_find_next, self.a_find_prev,
@@ -407,7 +407,8 @@ class MainWindow(QMainWindow):
                   self.a_tool_pan, self.a_tool_select, self.a_tool_text,
                   self.a_tool_redact, self.a_tool_image, self.a_tool_link,
                   self.a_tool_pen, self.a_tool_highlight, self.a_tool_underline,
-                  self.a_tool_strikeout, self.a_tool_note):
+                  self.a_tool_strikeout, self.a_tool_note,
+                  self.a_ocr, self.a_attachments, self.a_fill_forms, self.a_flatten_forms):
             self.addAction(a)
 
     def _fill_pages_menu(self, m: QMenu, full: bool):
