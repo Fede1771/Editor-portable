@@ -123,7 +123,7 @@ class WelcomeWidget(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20)
 
         card = QFrame()
-        card.setMaximumWidth(650)
+        card.setMaximumWidth(580)
         card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         card_layout = QVBoxLayout(card)
@@ -188,13 +188,6 @@ class WelcomeWidget(QWidget):
         self.btn_create_files.setToolTip("Crear PDF desde archivos (Ctrl+N)")
         self.btn_create_files.clicked.connect(self.createFromFilesRequested.emit)
         btn_row.addWidget(self.btn_create_files)
-
-        self.btn_blank = QPushButton("📄  Documento en blanco")
-        self.btn_blank.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_blank.setFixedHeight(34)
-        self.btn_blank.setToolTip("Crear documento PDF en blanco A4")
-        self.btn_blank.clicked.connect(self.blankDocRequested.emit)
-        btn_row.addWidget(self.btn_blank)
 
         drop_layout.addLayout(btn_row)
         card_layout.addWidget(drop_box)

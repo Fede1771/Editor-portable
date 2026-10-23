@@ -200,18 +200,14 @@ def test_h37_h38_requirements_and_packaging_files():
     assert "%~dp0EditorPDFPortable.exe" in bat_txt
 
 
-def test_welcome_create_from_files_button(qapp, monkeypatch):
-    """Verifica que el botón 'Crear PDF desde archivos' está presente antes que 'Documento en blanco' y conectado."""
+def test_welcome_buttons(qapp, monkeypatch):
+    """Verifica que la pantalla de bienvenida tiene 'Abrir archivo' y 'Crear PDF desde archivos', y no documento en blanco."""
     win = MainWindow()
     try:
         w = win.welcome
+        assert hasattr(w, "btn_open")
         assert hasattr(w, "btn_create_files")
-        assert hasattr(w, "btn_blank")
-        from PySide6.QtWidgets import QPushButton
-        btns = w.findChildren(QPushButton)
-        assert w.btn_create_files in btns
-        assert w.btn_blank in btns
-        assert btns.index(w.btn_create_files) < btns.index(w.btn_blank), "btn_create_files debe estar antes que btn_blank"
+        assert not hasattr(w, "btn_blank")
 
         called = []
         monkeypatch.setattr(win, "create_from_files", lambda: called.append(True))
