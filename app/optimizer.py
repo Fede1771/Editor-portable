@@ -48,8 +48,9 @@ def optimize_document(
     sanitize_metadata: bool = False,
     max_dim: int = 1800,
 ) -> tuple[int, int, float]:
-    """Optimiza el PDF reduciendo su peso, recomprimiendo imágenes y limpiando objetos huérfanos.
+    """Optimiza el PDF reduciendo su peso, recomprimiendo imágenes, aplicando subconjunto de fuentes
 
+    y compactando tablas de objetos en streams.
     Retorna (bytes_iniciales, bytes_finales, porcentaje_ahorro).
     """
     initial_bytes = doc.tobytes()
@@ -59,28 +60,53 @@ def optimize_document(
     opt_doc = fitz.open("pdf", initial_bytes)
 
     if sanitize_metadata:
-        # Limpieza de metadatos sensibles (autor, software de creación, fechas internas)
         opt_doc.set_metadata({})
+        try:
+            opt_doc.scrub(
+                attached_files=False,
+                clean_pages=True,
+                embedded_files=False,
+                hidden_text=False,
+                javascript=True,
+                metadata=True,
+                redactions=False,
+                remove_links=False,
+                reset_fields=False,
+                reset_responses=False,
+                thumbnails=True,
+                xml_metadata=True,
+            )
+        except Exception:
+            pass
 
     if compress_images:
+        processed_xrefs: set[int] = set()
         for pno in range(opt_doc.page_count):
             page = opt_doc[pno]
             for img_info in page.get_images(full=True):
                 xref = img_info[0]
+                if xref in processed_xrefs:
+                    continue
+                processed_xrefs.add(xref)
                 try:
                     base = opt_doc.extract_image(xref)
                     w, h = base["width"], base["height"]
+                    raw_len = len(base["image"])
 
-                    # Solo procesar si supera los límites razonables
-                    if w > max_dim or h > max_dim or (w > 500 and base.get("ext") in ("png", "bmp")):
+                    # Recomprimir si excede dimensiones o si es una imagen con peso relevante
+                    if w > max_dim or h > max_dim or raw_len > 10000 or base.get("ext") in ("png", "bmp", "tiff", "tif"):
                         pix = fitz.Pixmap(opt_doc, xref)
+
+                        # Detección y normalización de espacio de color
                         if pix.n >= 5:
                             pix = fitz.Pixmap(fitz.csRGB, pix)
-                        elif pix.colorspace != fitz.csRGB and pix.n != 3:
+                        elif pix.colorspace != fitz.csRGB and pix.n not in (1, 3):
                             pix = fitz.Pixmap(fitz.csRGB, pix)
 
-                        # Reescalado de alta fidelidad con QImage
-                        qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+                        is_gray = (pix.n == 1 or pix.colorspace == fitz.csGRAY)
+                        fmt = QImage.Format_Grayscale8 if is_gray else QImage.Format_RGB888
+
+                        qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
                         if w > max_dim or h > max_dim:
                             scaled = qimg.scaled(max_dim, max_dim, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         else:
@@ -92,23 +118,38 @@ def optimize_document(
                         scaled.save(buf, "JPEG", image_quality)
                         compressed_data = bytes(ba.data())
 
-                        # Solo reemplazar si los bytes resultantes son efectivamente menores
-                        if len(compressed_data) < len(base["image"]):
+                        # Solo reemplazar si los bytes resultantes son estrictamente menores
+                        if len(compressed_data) < raw_len:
                             opt_doc.update_stream(xref, compressed_data)
                 except Exception:
                     continue
 
+    # Optimización y subconjunto de fuentes (descarta caracteres no utilizados)
+    try:
+        opt_doc.subset_fonts()
+    except Exception:
+        pass
+
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    # Guardar con compactación máxima de objetos, compresión deflate y limpieza de huérfanos
+    # Guardar con compactación máxima, compresión deflate profunda y streams de objetos
     opt_doc.save(
         out_path,
         garbage=4,
-        deflate=True,
         clean=True,
+        deflate=True,
+        deflate_images=True,
+        deflate_fonts=True,
+        use_objstms=1,
         linear=False,
     )
     opt_doc.close()
 
     final_size = os.path.getsize(out_path)
+    # Salvaguarda: si por alguna razón la optimización incrementara el peso, mantener la copia original
+    if final_size > initial_size and initial_size > 0:
+        with open(out_path, "wb") as f:
+            f.write(initial_bytes)
+        final_size = initial_size
+
     saving = max(0.0, (1.0 - (final_size / max(1, initial_size))) * 100.0)
     return initial_size, final_size, round(saving, 1)
