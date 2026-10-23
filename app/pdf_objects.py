@@ -11,6 +11,7 @@ MAX_OBJECT_BYTES = 262_144
 MAX_OBJECT_DEPTH = 64
 MAX_OBJECT_ELEMENTS = 5_000
 MAX_TRAVERSAL_NODES = 10_000
+MAX_TEXT_BYTES = 4 * 1024 * 1024
 
 
 class PdfObjectLimitError(ValueError):
@@ -144,7 +145,11 @@ def decode_pdf_bytes(data: bytes) -> str:
     if not data:
         return ""
     if data.startswith((b"\xfe\xff", b"\xff\xfe")):
-        return data.decode("utf-16", errors="replace")
+        return data.decode("utf-16")
+    if data.startswith(b"\x00<"):
+        return data.decode("utf-16-be")
+    if data.startswith(b"<\x00"):
+        return data.decode("utf-16-le")
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
@@ -161,38 +166,36 @@ def get_text_representations(doc, xref: int, key: str) -> list[str]:
     out: list[str] = []
     visited_xrefs: set[int] = set()
 
-    def _collect(obj) -> None:
-        if len(visited_xrefs) > MAX_TRAVERSAL_NODES:
-            return
+    pending = [parse_object(raw)]
+    count = 0
+    text_bytes = 0
+    while pending:
+        count += 1
+        if count > MAX_TRAVERSAL_NODES:
+            raise PdfObjectLimitError("La representación textual supera el límite de inspección.")
+        obj = pending.pop()
         if isinstance(obj, IndirectObject):
-            if obj.idnum in visited_xrefs or obj.idnum <= 0:
-                return
+            if obj.idnum in visited_xrefs:
+                continue
+            if obj.idnum <= 0:
+                raise ValueError("Referencia textual PDF inválida.")
             visited_xrefs.add(obj.idnum)
             if doc.xref_is_stream(obj.idnum):
-                try:
-                    out.append(decode_pdf_bytes(doc.xref_stream(obj.idnum) or b""))
-                except Exception:
-                    pass
-            try:
-                _collect(parse_object(doc.xref_object(obj.idnum)))
-            except Exception:
-                pass
-            return
-        if isinstance(obj, (bytes, bytearray)):
+                data = doc.xref_stream(obj.idnum) or b""
+                text_bytes += len(data)
+                if text_bytes > MAX_TEXT_BYTES:
+                    raise PdfObjectLimitError("El texto alternativo supera el límite de inspección.")
+                out.append(decode_pdf_bytes(data))
+            else:
+                pending.append(parse_object(doc.xref_object(obj.idnum)))
+        elif isinstance(obj, (bytes, bytearray)):
             out.append(decode_pdf_bytes(bytes(obj)))
         elif isinstance(obj, str):
             out.append(obj)
         elif isinstance(obj, ArrayObject):
-            for item in obj:
-                _collect(item)
+            pending.extend(obj)
         elif isinstance(obj, DictionaryObject):
-            for val in obj.values():
-                _collect(val)
-
-    try:
-        _collect(parse_object(raw))
-    except Exception:
-        out.append(raw)
+            pending.extend(obj.values())
     return [t for t in out if t]
 
 
@@ -234,6 +237,105 @@ def field_chain(doc, xref: int):
         yield xref
         kind, raw = doc.xref_get_key(xref, "Parent")
         xref = int(raw.split()[0]) if kind == "xref" else 0
+
+
+def terminal_field_owner(doc, xref: int) -> int | None:
+    """El campo terminal más cercano; nunca convertir un grupo de campos en un valor."""
+    for cur in field_chain(doc, xref):
+        subtype = doc.xref_get_key(cur, "Subtype")[1]
+        named = doc.xref_get_key(cur, "T")[0] != "null"
+        typed = doc.xref_get_key(cur, "FT")[0] != "null"
+        parent = doc.xref_get_key(cur, "Parent")[0] == "xref"
+        if subtype == "/Widget" and parent and not named:
+            continue
+        kids = get_value(doc, cur, "Kids")
+        if isinstance(kids, ArrayObject):
+            for kid in kids:
+                if not isinstance(kid, IndirectObject):
+                    raise ValueError("El campo contiene un descendiente PDF no representable.")
+                if (doc.xref_get_key(kid.idnum, "Subtype")[1] != "/Widget"
+                        or doc.xref_get_key(kid.idnum, "T")[0] != "null"):
+                    return None  # grupo no terminal, con campos hijos independientes
+        if named or typed or isinstance(kids, ArrayObject) or subtype == "/Widget":
+            return cur
+    return None
+
+
+def terminal_field_nodes(doc, xref: int) -> list[int]:
+    """Campo terminal y sus widgets, sin padres de agrupación ni campos hermanos."""
+    owner = terminal_field_owner(doc, xref)
+    if owner is None:
+        return []
+    nodes = [owner]
+    kids = get_value(doc, owner, "Kids")
+    if isinstance(kids, ArrayObject):
+        for kid in kids:
+            if not isinstance(kid, IndirectObject):
+                raise ValueError("Widget PDF no representable.")
+            if kid.idnum not in nodes:
+                nodes.append(kid.idnum)
+    if xref not in nodes:
+        nodes.append(xref)
+    return nodes
+
+
+def reachable_xrefs(doc, *, excluded: set[int] | None = None) -> set[int]:
+    """Objetos todavía usados por el catálogo, sin entrar en nodos eliminados.
+
+    Seguir referencias estructurales evita tratar texto parecido a '12 0 R'
+    como un enlace y permite preservar recursos compartidos al censurar.
+    """
+    excluded = excluded or set()
+    pending = [IndirectObject(doc.pdf_catalog(), 0, _CONTEXT)]
+    visited: set[int] = set()
+    steps = 0
+    while pending:
+        obj = pending.pop()
+        steps += 1
+        if steps > MAX_TRAVERSAL_NODES * 10:
+            raise PdfObjectLimitError("El documento supera el límite de inspección de referencias.")
+        if isinstance(obj, IndirectObject):
+            if obj.idnum in excluded or obj.idnum in visited:
+                continue
+            if len(visited) >= MAX_TRAVERSAL_NODES:
+                raise PdfObjectLimitError("El documento supera el límite de referencias inspeccionables.")
+            visited.add(obj.idnum)
+            pending.append(parse_object(doc.xref_object(obj.idnum)))
+        elif isinstance(obj, DictionaryObject):
+            pending.extend(obj.values())
+        elif isinstance(obj, ArrayObject):
+            pending.extend(obj)
+    return visited
+
+
+def appearance_streams(doc, xref: int) -> list[int]:
+    """Streams N/R/D y todos sus estados, conservando las referencias originales."""
+    pending = []
+    for key in ("AP/N", "AP/R", "AP/D"):
+        kind, raw = doc.xref_get_key(xref, key)
+        if kind != "null":
+            pending.append(parse_object(raw))
+    visited: set[int] = set()
+    result = []
+    steps = 0
+    while pending:
+        steps += 1
+        if steps > MAX_TRAVERSAL_NODES:
+            raise PdfObjectLimitError("Demasiados estados de apariencia para inspeccionar.")
+        obj = pending.pop()
+        if isinstance(obj, IndirectObject):
+            if obj.idnum in visited:
+                continue
+            visited.add(obj.idnum)
+            if doc.xref_is_stream(obj.idnum):
+                result.append(obj.idnum)
+            else:
+                pending.append(parse_object(doc.xref_object(obj.idnum)))
+        elif isinstance(obj, DictionaryObject):
+            pending.extend(obj.values())
+        else:
+            raise ValueError("La apariencia PDF no es un stream o diccionario de estados válido.")
+    return result
 
 
 def iter_outline_xrefs(doc) -> list[int]:

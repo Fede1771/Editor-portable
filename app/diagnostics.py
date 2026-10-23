@@ -51,6 +51,15 @@ def self_test(output_dir: str) -> int:
         try:
             assert recognized._editorpdf_ocr_report["recognized"] == [1]
             assert recognized.metadata["encryption"] == doc.metadata["encryption"]
+            assert recognized[0].rect == doc[0].rect
+            assert recognized[0].rotation == doc[0].rotation
+            # Verificar el resultado persistido, no sólo el documento en RAM.
+            from .document_io import save_pdf
+            saved_ocr = work / "recognized.pdf"
+            save_pdf(recognized, str(saved_ocr), garbage=4)
+            with open_pdf(saved_ocr.read_bytes(), "test-user") as check:
+                assert check[0].rect == doc[0].rect
+                assert "PORTABLE_RUNTIME_CHECK" in check[0].get_text()
         finally:
             recognized.close()
         result["checks"]["ocr"] = True

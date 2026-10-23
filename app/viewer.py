@@ -30,13 +30,16 @@ def bounded_render_matrix(
     max_pixels: int = MAX_RENDER_PIXELS,
     max_width: float | None = None,
     max_height: float | None = None,
+    clip: fitz.Rect | None = None,
 ) -> fitz.Matrix:
     """Calcula una matriz de renderizado acotada en ancho, alto y presupuesto total de píxeles (V08)."""
-    rect = page.rect
+    rect = page.rect if clip is None else (fitz.Rect(clip) & page.rect)
     w = abs(float(rect.width))
     h = abs(float(rect.height))
-    if w <= 0.0 or h <= 0.0 or not math.isfinite(w) or not math.isfinite(h):
+    if w <= 0.0 or h <= 0.0 or not all(math.isfinite(v) for v in rect):
         raise ValueError("Dimensiones de página inválidas para renderizado.")
+    if max_pixels < 1:
+        raise ValueError("El presupuesto de renderizado debe ser positivo.")
     eff_w, eff_h = (h, w) if (rotation % 360) in (90, 270) else (w, h)
     if max_width is not None and max_height is not None:
         fit_scale = min(max_width / eff_w, max_height / eff_h)
@@ -44,6 +47,8 @@ def bounded_render_matrix(
     else:
         sx = float(scale_x)
         sy = float(scale_x if scale_y is None else scale_y)
+    if not all(math.isfinite(v) and v > 0 for v in (sx, sy)):
+        raise ValueError("La escala de renderizado debe ser positiva y finita.")
 
     est_w = max(1.0, math.ceil(eff_w * sx))
     est_h = max(1.0, math.ceil(eff_h * sy))
@@ -63,7 +68,20 @@ def bounded_render_matrix(
             sx *= factor2
             sy *= factor2
 
-    return fitz.Matrix(sx, sy).prerotate(rotation)
+    # MuPDF redondea los extremos absolutos, no sólo ancho y alto. En un
+    # recorte angosto, ese píxel adicional puede duplicar el presupuesto.
+    for _ in range(16):
+        matrix = fitz.Matrix(sx, sy).prerotate(rotation)
+        pixels = (rect * matrix).irect
+        count = pixels.width * pixels.height
+        if count <= max_pixels:
+            return matrix
+        factor = math.sqrt(max_pixels / count) * 0.98
+        if min(pixels.width, pixels.height) <= 4:
+            factor = min(factor, max_pixels / count * 0.98)
+        sx *= factor
+        sy *= factor
+    raise ValueError("No se pudo acotar el rasterizado al presupuesto permitido.")
 
 
 def render_bounded_pixmap(
@@ -76,6 +94,7 @@ def render_bounded_pixmap(
     max_width: float | None = None,
     max_height: float | None = None,
     alpha: bool = False,
+    clip: fitz.Rect | None = None,
 ) -> fitz.Pixmap:
     """Renderiza un Pixmap garantizando que nunca supere el presupuesto de píxeles (V08)."""
     base_scale = (dpi / 72.0) if dpi is not None else (scale if scale is not None else 1.0)
@@ -86,8 +105,14 @@ def render_bounded_pixmap(
         max_pixels=max_pixels,
         max_width=max_width,
         max_height=max_height,
+        clip=clip,
     )
-    return page.get_pixmap(matrix=mat, alpha=alpha)
+    pix = page.get_pixmap(matrix=mat, alpha=alpha, clip=clip)
+    # matrix= no transmite DPI al Pixmap. El OCR y los formatos de imagen
+    # necesitan la resolución efectiva, también cuando actuó el presupuesto.
+    pix.set_dpi(max(1, round(72 * math.hypot(mat.a, mat.b))),
+                max(1, round(72 * math.hypot(mat.c, mat.d))))
+    return pix
 
 MODE_CONTINUOUS = "continuous"
 MODE_SINGLE = "single"

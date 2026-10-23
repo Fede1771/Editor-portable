@@ -853,9 +853,9 @@ class FillFormsDialog(_BaseDialog):
                             lambda n=fname, w=lw: self._sync_group(n, w, [it.data(Qt.UserRole) for it in w.selectedItems()])
                         )
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", lw)
-                elif ftype in ("Choice", "ListBox", "ComboBox") and choices:
+                elif ftype in ("Choice", "ListBox", "ComboBox", "RadioButton") and choices:
                     combo = QComboBox()
-                    combo.setEditable(bool(f.get("editable_choice", False)))
+                    combo.setEditable(ftype != "RadioButton" and bool(f.get("editable_choice", False)))
                     for choice, label in zip(choices, labels):
                         combo.addItem(label, choice)
                     cur_val = str(val[0]) if isinstance(val, (list, tuple)) and val else str(val or "")
@@ -879,6 +879,8 @@ class FillFormsDialog(_BaseDialog):
                     self.form.addRow(f"{label_txt} (Pág {f['page']+1}):", combo)
                 else:
                     line = QLineEdit(str(val or ""))
+                    if f.get("unsupported_reason"):
+                        line.setToolTip(f["unsupported_reason"])
                     if is_ro:
                         line.setReadOnly(True)
                     else:

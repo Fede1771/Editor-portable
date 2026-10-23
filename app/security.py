@@ -31,6 +31,11 @@ _DANGEROUS_ACTIONS = {
     "/JavaScript", "/Launch", "/ImportData", "/SubmitForm", "/RichMediaExecute",
     "/GoToR", "/GoToE", "/Sound", "/Movie", "/Rendition",
 }
+_ACTION_EVENTS = {
+    "/E", "/X", "/D", "/U", "/Fo", "/Bl", "/PO", "/PC", "/PV", "/PI",
+    "/O", "/C", "/K", "/F", "/V", "/WC", "/WS", "/DS", "/WP", "/DP",
+    "/NA", "/PA", "/Next",
+}
 
 
 class UnsupportedActiveContentError(ValueError):
@@ -67,8 +72,10 @@ def _action_types(doc, value) -> set[str]:
                 if obj.get("/Next") is not None:
                     pending.append(obj.get("/Next"))
             else:
-                # /AA es un diccionario de eventos; nunca interpretar su texto.
-                pending.extend(v for v in obj.values() if isinstance(v, (DictionaryObject, ArrayObject, IndirectObject)))
+                # Sólo eventos conocidos; un destino puede referenciar un Page,
+                # pero sus recursos y anotaciones no son acciones encadenadas.
+                pending.extend(v for k, v in obj.items() if k in _ACTION_EVENTS
+                               and isinstance(v, (DictionaryObject, ArrayObject, IndirectObject)))
     return types
 
 
@@ -154,7 +161,7 @@ def scan_document_security(doc: fitz.Document) -> dict:
 
 def _collect_indirect_action_xrefs(doc, xref: int, key_path: str) -> list[int]:
     """Recopila objetos indirectos de acción bajo `key_path` para limpiarlos en memoria."""
-    from .pdf_objects import ArrayObject, DictionaryObject, IndirectObject, parse_object, MAX_TRAVERSAL_NODES
+    from .pdf_objects import ArrayObject, DictionaryObject, IndirectObject, NameObject, parse_object, MAX_TRAVERSAL_NODES
     parts = [p for p in key_path.split("/") if p]
     cur_xref = xref
     prefix: list[str] = []
@@ -172,36 +179,42 @@ def _collect_indirect_action_xrefs(doc, xref: int, key_path: str) -> list[int]:
     kind, raw = doc.xref_get_key(cur_xref, final_key)
     if kind == "null":
         return []
-    pending = [parse_object(raw)]
+    name_tree = key_path == "Names/JavaScript"
+    pending = [(parse_object(raw), name_tree)]
     visited: set[int] = set()
     action_xrefs: list[int] = []
-    while pending and len(visited) < MAX_TRAVERSAL_NODES:
-        obj = pending.pop()
+    steps = 0
+    while pending:
+        steps += 1
+        if steps > MAX_TRAVERSAL_NODES:
+            raise UnsupportedActiveContentError("Demasiadas acciones para inspeccionar su saneamiento.")
+        obj, in_name_tree = pending.pop()
+        indirect = None
         if isinstance(obj, IndirectObject):
             if obj.idnum in visited or obj.idnum <= 0:
                 continue
             visited.add(obj.idnum)
-            t_kind, t_val = doc.xref_get_key(obj.idnum, "Type")
-            if t_val not in ("/Page", "/Pages", "/Catalog", "/Outlines", "/Annot"):
-                action_xrefs.append(obj.idnum)
-            try:
-                pending.append(parse_object(doc.xref_object(obj.idnum)))
-            except Exception:
-                pass
-        elif isinstance(obj, ArrayObject):
-            pending.extend(obj)
+            indirect = obj.idnum
+            obj = parse_object(doc.xref_object(obj.idnum))
+        if isinstance(obj, ArrayObject):
+            pending.extend((value, in_name_tree) for value in obj
+                           if isinstance(value, (DictionaryObject, ArrayObject, IndirectObject)))
         elif isinstance(obj, DictionaryObject):
-            for k, v in obj.items():
-                if k in ("/P", "/Parent", "/First", "/Last", "/Prev"):
-                    continue
-                if isinstance(v, (DictionaryObject, ArrayObject, IndirectObject)):
-                    pending.append(v)
+            if isinstance(obj.get("/S"), NameObject):
+                if indirect is not None:
+                    action_xrefs.append(indirect)
+                if obj.get("/Next") is not None:
+                    pending.append((obj.get("/Next"), False))
+            else:
+                keys = {"/Kids", "/Names"} if in_name_tree else _ACTION_EVENTS
+                pending.extend((value, in_name_tree) for key, value in obj.items() if key in keys
+                               and isinstance(value, (DictionaryObject, ArrayObject, IndirectObject)))
     return action_xrefs
 
 
 def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
     """Limpiar claves de acción; XFA sólo con consentimiento explícito de pérdida."""
-    from .pdf_objects import DictionaryObject, NameObject, set_pdf_key_null
+    from .pdf_objects import DictionaryObject, NameObject, set_pdf_key_null, reachable_xrefs
     xfa = has_xfa(doc)
     if xfa and not remove_xfa:
         raise UnsupportedActiveContentError(
@@ -225,10 +238,16 @@ def sanitize_document(doc: fitz.Document, *, remove_xfa: bool = False) -> int:
     if xfa:
         changes.append((cat, "AcroForm/XFA"))
     detached_xrefs: set[int] = set()
+    # Completar la inspección antes de mutar y conservar acciones compartidas
+    # que sigan siendo alcanzables desde navegación no afectada.
     for xref, key in changes:
         detached_xrefs.update(_collect_indirect_action_xrefs(doc, xref, key))
+    if changes:
+        reachable_xrefs(doc)  # verificar límites antes de desconectar claves
+    for xref, key in changes:
         set_pdf_key_null(doc, xref, key)
-    for act_xref in detached_xrefs:
+    preserved = reachable_xrefs(doc)
+    for act_xref in detached_xrefs - preserved:
         for k in ("S", "JS", "F", "Win", "Unix", "Mac", "Next", "URI"):
             doc.xref_set_key(act_xref, k, "null")
     return len(changes)

@@ -4,10 +4,13 @@ Módulo para gestión, rellenado y aplanado de formularios PDF (AcroForms) y pro
 from __future__ import annotations
 
 from typing import Any
+from io import BytesIO
 import pymupdf as fitz
 from .pdf_objects import (
     ArrayObject, DictionaryObject, IndirectObject, NameObject,
     array_strings, field_chain, get_value, iter_acroform_field_xrefs, parse_object,
+    terminal_field_owner,
+    terminal_field_nodes,
 )
 
 _SIG_DICT_KEYS = {"/ByteRange", "/Contents", "/SubFilter", "/Cert", "/Reference"}
@@ -167,13 +170,19 @@ def _normalize_choices(raw_choices: Any) -> list[str]:
 
 
 def _canonical_field_owner(doc: fitz.Document, xref: int) -> int:
-    chain = list(field_chain(doc, xref))
-    return chain[-1] if chain else xref
+    owner = terminal_field_owner(doc, xref)
+    if owner is None:
+        raise ValueError("No se pudo identificar el campo terminal del formulario.")
+    return owner
 
 
 def _get_xref_v_array(doc: fitz.Document, xref: int) -> list[str] | None:
-    chain = list(field_chain(doc, xref))
-    for cur in reversed(chain):
+    owner = _canonical_field_owner(doc, xref)
+    # Preferir el valor canónico y admitir documentos anteriores que guardaron
+    # explícitamente el array en el widget, sin confundir campos hermanos.
+    candidates = list(field_chain(doc, owner))
+    candidates.extend(cur for cur in field_chain(doc, xref) if cur not in candidates)
+    for cur in candidates:
         kind, val = doc.xref_get_key(cur, "V")
         if kind == "array":
             return _parse_pdf_array_strings(val)
@@ -184,7 +193,7 @@ def normalize_field_value(field_meta: dict[str, Any], val: Any) -> Any:
     """Normaliza la representación de un valor de campo según su tipo (O01)."""
     ftype = field_meta.get("type", "")
     if ftype == "CheckBox":
-        return bool(val) and str(val).strip("/") not in ("Off", "No", "False", "0", "")
+        return bool(val) and str(val).lstrip("/") != "Off"
     if ftype == "ListBox" and field_meta.get("multi_select"):
         if isinstance(val, (list, tuple)):
             return [str(x) for x in val]
@@ -192,6 +201,71 @@ def normalize_field_value(field_meta: dict[str, Any], val: Any) -> Any:
     if isinstance(val, (list, tuple)):
         return str(val[0]) if val else ""
     return str(val or "")
+
+
+def _pdf_name(value: str) -> str:
+    out = BytesIO()
+    NameObject("/" + value).write_to_stream(out)
+    return out.getvalue().decode("ascii")
+
+
+def _radio_group(doc: fitz.Document, owner: int) -> dict[str, Any]:
+    """Opciones reales del terminal; distinguir widgets con el mismo estado On."""
+    flags = 0
+    for cur in field_chain(doc, owner):
+        value = get_value(doc, cur, "Ff")
+        if value is not None:
+            flags = int(value)
+            break
+    nodes = [x for x in terminal_field_nodes(doc, owner)
+             if doc.xref_get_key(x, "Subtype")[1] == "/Widget"]
+    opt = get_value(doc, owner, "Opt")
+    options = []
+    for index, xref in enumerate(nodes):
+        normal = get_value(doc, xref, "AP/N")
+        states = [str(k)[1:] for k in normal if str(k) != "/Off"] if isinstance(normal, DictionaryObject) else []
+        if len(states) != 1 or "/Off" not in normal:
+            raise ValueError("El grupo radio contiene una opción sin apariencias On/Off válidas.")
+        label = str(opt[index]) if isinstance(opt, ArrayObject) and index < len(opt) else states[0]
+        options.append({"xref": xref, "state": states[0], "label": label})
+    if not options:
+        raise ValueError("El grupo radio no contiene opciones editables.")
+    unison = bool(flags & (1 << 25))
+    for option in options:
+        same_state = sum(o["state"] == option["state"] for o in options)
+        option["token"] = (option["state"] if unison or same_state == 1 else
+                           f"widget:{option['xref']}:{option['state']}")
+        if same_state > 1 and not unison:
+            option["label"] += f" (opción {options.index(option) + 1})"
+    active = [o for o in options if doc.xref_get_key(o["xref"], "AS")[1] == _pdf_name(o["state"])]
+    canonical = str(get_value(doc, owner, "V") or "/Off").lstrip("/")
+    current = active[0]["token"] if active else canonical
+    choices, labels = [], []
+    if not flags & (1 << 14) or current == "Off":
+        choices.append("Off")
+        labels.append("Sin selección")
+    for option in options:
+        if option["token"] not in choices:
+            choices.append(option["token"])
+            labels.append(option["label"])
+    return {"options": options, "choices": choices, "labels": labels, "value": current, "flags": flags}
+
+
+def _update_radio_group(doc: fitz.Document, owner: int, value: Any) -> int:
+    group = _radio_group(doc, owner)
+    token = str(value).lstrip("/")
+    if token not in group["choices"]:
+        raise ValueError("Opción radio inválida, ambigua o desactivación no permitida por NoToggleToOff.")
+    selected = next((o for o in group["options"] if o["token"] == token), None)
+    state = selected["state"] if selected else "Off"
+    doc.xref_set_key(owner, "V", _pdf_name(state))
+    for option in group["options"]:
+        active = selected is not None and (option["xref"] == selected["xref"] or
+                 bool(group["flags"] & (1 << 25)) and option["state"] == state)
+        doc.xref_set_key(option["xref"], "AS", _pdf_name(option["state"] if active else "Off"))
+        if option["xref"] != owner:
+            doc.xref_set_key(option["xref"], "V", "null")
+    return len(group["options"])
 
 
 def _sync_listbox_appearance(doc: fitz.Document, w: fitz.Widget, selected_indices: list[int]) -> None:
@@ -228,6 +302,7 @@ def _sync_listbox_appearance(doc: fitz.Document, w: fitz.Widget, selected_indice
 def get_form_fields(doc: fitz.Document) -> list[dict[str, Any]]:
     """Obtiene todos los campos de formulario presentes en el PDF con sus valores actuales."""
     fields = []
+    radio_groups = {}
     multi_flag = getattr(fitz, "PDF_CH_FIELD_IS_MULTI_SELECT", 1 << 21)
     for page_idx in range(len(doc)):
         page = doc[page_idx]
@@ -243,10 +318,22 @@ def get_form_fields(doc: fitz.Document) -> list[dict[str, Any]]:
             flags = getattr(w, "field_flags", 0) or 0
             is_read_only = bool(flags & fitz.PDF_FIELD_IS_READ_ONLY)
             is_multi = bool(flags & multi_flag)
+            unsupported_reason = ""
 
             if w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
                 ft = "CheckBox"
-                val = bool(val) and str(val).strip("/") not in ("Off", "No", "False", "0", "")
+                val = bool(val) and str(val).lstrip("/") != "Off"
+            elif w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
+                ft = "RadioButton"
+                try:
+                    owner = _canonical_field_owner(doc, w.xref)
+                    if owner not in radio_groups:
+                        radio_groups[owner] = _radio_group(doc, owner)
+                    group = radio_groups[owner]
+                    choices, choice_labels, val = group["choices"], group["labels"], group["value"]
+                except ValueError as exc:
+                    is_read_only = True
+                    unsupported_reason = str(exc)
             elif w.field_type == fitz.PDF_WIDGET_TYPE_COMBOBOX:
                 ft = "ComboBox"
             elif w.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
@@ -272,6 +359,7 @@ def get_form_fields(doc: fitz.Document) -> list[dict[str, Any]]:
                 "editable_choice": bool(flags & (1 << 18)),
                 "read_only": is_read_only or is_sig,
                 "is_signature": is_sig,
+                "unsupported_reason": unsupported_reason,
             })
     return fields
 
@@ -284,6 +372,7 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
     - Sincroniza apariencias de todos los widgets asociados y revierte completamente ante fallo.
     """
     count = 0
+    handled_radios = set()
     edit_flag = getattr(fitz, "PDF_CH_FIELD_IS_EDIT", 1 << 18)
     objects = {x: doc.xref_object(x) for x in range(1, doc.xref_length())}
     streams = {x: doc.xref_stream_raw(x) for x in objects
@@ -304,13 +393,24 @@ def update_form_fields(doc: fitz.Document, field_dict: dict[str, Any]) -> int:
                 new_val = field_dict[w.field_name]
                 choices = _normalize_choices(getattr(w, "choice_values", None))
                 chain = list(field_chain(doc, w.xref))
-                owner_xref = chain[-1] if chain else w.xref
+                owner_xref = _canonical_field_owner(doc, w.xref)
+                chain = chain[:chain.index(owner_xref) + 1]
 
-                if w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
-                    checked = bool(new_val) and str(new_val).strip("/") not in ("Off", "No", "False", "0", "")
+                if w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
+                    if owner_xref not in handled_radios:
+                        count += _update_radio_group(doc, owner_xref, new_val)
+                        handled_radios.add(owner_xref)
+                    continue
+                elif w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
+                    checked = normalize_field_value({"type": "CheckBox"}, new_val)
+                    on_state = w.on_state()
+                    appearances = get_value(doc, w.xref, "AP/N")
+                    if checked and (not on_state or not isinstance(appearances, DictionaryObject)
+                                    or "/" + on_state not in appearances):
+                        raise ValueError(f"La casilla '{w.field_name}' no tiene un estado activado válido.")
                     w.field_value = checked
                     w.update()
-                    state_name = "/Yes" if checked else "/Off"
+                    state_name = _pdf_name(on_state if checked else "Off")
                     doc.xref_set_key(owner_xref, "V", state_name)
                     doc.xref_set_key(w.xref, "AS", state_name)
                     for child_xref in chain[:-1]:

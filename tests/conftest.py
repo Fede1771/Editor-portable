@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import warnings
+import gc
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,12 +23,23 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 
 
 @pytest.fixture(scope="session")
 def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
+    # Los tests crean ventanas con conexiones/ciclos Python y deleteLater().
+    # Destruirlas con Qt aún vivo, antes de la finalización del intérprete y
+    # de QApplication y sus backends nativos (salida 3 en la suite combinada).
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    gc.collect()
+    assert not app.topLevelWidgets(), "Quedaron ventanas nativas vivas al finalizar las pruebas."
+    app.shutdown()
 
 
 @pytest.fixture(autouse=True)

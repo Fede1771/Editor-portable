@@ -77,54 +77,41 @@ def pages_with_unpreserved_elements(
     return {"forms": form_pages, "annotations": annot_pages}
 
 
-def _restore_links_and_toc(
-    out_doc: fitz.Document,
-    toc_before: list,
-    links_by_page: dict[int, list[dict]],
-    replaced_pages: set[int],
-) -> None:
-    """Reconstruye enlaces internos/externos en páginas reemplazadas y marcadores del documento (V03)."""
-    for pno in sorted(replaced_pages):
-        if pno < 0 or pno >= out_doc.page_count:
-            continue
-        page = out_doc[pno]
-        for lnk in links_by_page.get(pno, []):
-            kind = lnk.get("kind")
-            if kind not in (fitz.LINK_GOTO, fitz.LINK_URI, fitz.LINK_NAMED):
-                continue
-            clean_lnk = {k: v for k, v in lnk.items() if k not in ("xref", "id")}
-            if kind == fitz.LINK_GOTO:
-                target_pg = clean_lnk.get("page", -1)
-                if not isinstance(target_pg, int) or target_pg < 0 or target_pg >= out_doc.page_count:
-                    continue
-            try:
-                page.insert_link(clean_lnk)
-            except Exception:
-                pass
+class _OCRPreservationError(RuntimeError):
+    pass
 
-    if toc_before:
-        restored_toc = []
-        for item in toc_before:
-            if len(item) < 3:
-                continue
-            lvl, title, pg = item[0], item[1], item[2]
-            if isinstance(pg, int) and 1 <= pg <= out_doc.page_count:
-                dest = dict(item[3]) if len(item) > 3 and isinstance(item[3], dict) else {}
-                dest.pop("xref", None)
-                if dest and dest.get("kind") == fitz.LINK_GOTO:
-                    dest["page"] = pg - 1
-                    restored_toc.append([lvl, title, pg, dest])
-                else:
-                    restored_toc.append([lvl, title, pg])
-            else:
-                restored_toc.append([lvl, title, -1])
+
+def _replace_recognized_content(doc: fitz.Document, pno: int, recognized: fitz.Document) -> None:
+    """Conservar el objeto Page, cajas, rotación, UserUnit y referencias entrantes.
+
+    El raster OCR ya está orientado como la página visible: se desrota al colocarlo
+    sobre el espacio de contenido original. Sólo se desconectan los contenidos
+    previos después de preparar correctamente el nuevo XObject.
+    """
+    try:
+        page = doc[pno]
+        old_contents = set(page.get_contents())
+        rotation = page.rotation
+        # MuPDF expone una matriz de transformación distinta con Rotate activo,
+        # particularmente con CropBox/UserUnit. Colocar en el espacio sin giro.
+        page.set_rotation(0)
         try:
-            out_doc.set_toc(restored_toc)
-        except Exception:
-            try:
-                out_doc.set_toc([[it[0], it[1], it[2]] for it in restored_toc])
-            except Exception:
-                pass
+            page.show_pdf_page(page.rect, recognized, 0, rotate=rotation)
+        finally:
+            page.set_rotation(rotation)
+        new_contents = [x for x in page.get_contents() if x not in old_contents]
+        if not new_contents:
+            raise ValueError("No se generó contenido OCR para la página.")
+        doc.xref_set_key(page.xref, "Contents", "[" + " ".join(f"{x} 0 R" for x in new_contents) + "]")
+        # Las apariencias ya se rasterizaron. La interfaz exige consentimiento
+        # antes de convertir widgets y comentarios a contenido fijo.
+        for widget in list(page.widgets()):
+            page.delete_widget(widget)
+        for annot in list(page.annots()):
+            page.delete_annot(annot)
+    except Exception as exc:
+        # No presentar como fallo de reconocimiento ni devolver una copia parcial.
+        raise _OCRPreservationError(f"No se pudo conservar la estructura de la página {pno + 1}: {exc}") from exc
 
 
 def ocr_document(
@@ -153,13 +140,6 @@ def ocr_document(
         "unpreserved_elements": unpreserved,
     }
     try:
-        toc_before = out_doc.get_toc(simple=False)
-        links_by_page = {
-            pno: [dict(lnk) for lnk in out_doc[pno].get_links()]
-            for pno in target_pages
-        }
-        replaced_pages: set[int] = set()
-
         for idx, pno in enumerate(target_pages):
             if progress_callback and not progress_callback(idx + 1, total):
                 raise InterruptedError("Operación de OCR cancelada por el usuario.")
@@ -175,22 +155,19 @@ def ocr_document(
                     with fitz.open("pdf", data) as recognized:
                         if not any(p.get_text().strip() for p in recognized):
                             raise ValueError("El motor no reconoció texto en esta página.")
-                        out_doc.insert_pdf(recognized, start_at=pno)
-                        out_doc.delete_page(pno + 1)
-                    replaced_pages.add(pno)
+                        _replace_recognized_content(out_doc, pno, recognized)
                     report["recognized"].append(pno + 1)
                     if candidate != language:
                         report["fallback_language"].append(pno + 1)
                     inserted = True
                     break
+                except _OCRPreservationError:
+                    raise
                 except Exception as exc:
                     error = str(exc)
             if not inserted:
                 # Conservar página original, texto, geometría y datos; no rasterizar como falso éxito.
                 report["failed"].append({"page": pno + 1, "error": error})
-
-        if replaced_pages:
-            _restore_links_and_toc(out_doc, toc_before, links_by_page, replaced_pages)
 
         report["status"] = "failed" if not report["recognized"] else ("partial" if report["failed"] else "success")
         out_doc._editorpdf_ocr_report = report

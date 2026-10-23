@@ -4,18 +4,45 @@ from __future__ import annotations
 import html
 import os
 import re
+from html.parser import HTMLParser
 from typing import Sequence
 
 import pymupdf as fitz
+from .viewer import render_bounded_pixmap
 from .pdf_objects import (
-    ArrayObject, IndirectObject, field_chain, get_text_representations,
+    ArrayObject, IndirectObject, get_text_representations,
     get_value, iter_acroform_field_xrefs, parse_object, set_pdf_key_null,
+    terminal_field_owner, terminal_field_nodes,
+    appearance_streams, reachable_xrefs,
 )
+from .appearances import AppearanceInspector
+
+MAX_SAMPLE_PIXELS = 65_536
 
 
 def _page_bounds(page: fitz.Page) -> fitz.Rect:
     """Límites en el mismo espacio no rotado que texto, widgets y dibujos."""
     return (page.rect * page.derotation_matrix).normalize()
+
+
+class _RichText(HTMLParser):
+    """Inline concatena; límites de bloque y br separan palabras/párrafos."""
+    _BLOCKS = {"p", "div", "br", "li", "tr", "td", "th", "section", "body"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._BLOCKS:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag in self._BLOCKS:
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        self.parts.append(data)
 
 
 def _text_matches_phrase(raw_text: str, phrase_low: str) -> bool:
@@ -32,7 +59,12 @@ def _text_matches_phrase(raw_text: str, phrase_low: str) -> bool:
     if phrase_low in no_tags:
         return True
     spaced_tags = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]*>", " ", raw_text))).strip().casefold()
-    return phrase_low in spaced_tags
+    normalized_phrase = " ".join(phrase_low.split())
+    parser = _RichText()
+    parser.feed(raw_text)
+    parser.close()
+    semantic_text = " ".join("".join(parser.parts).split()).casefold()
+    return normalized_phrase in spaced_tags or normalized_phrase in semantic_text
 
 
 def _safe_page_widgets(page: fitz.Page) -> list[fitz.Widget]:
@@ -62,36 +94,43 @@ def _safe_page_widgets(page: fitz.Page) -> list[fitz.Widget]:
 
 
 def _field_family_xrefs(doc, xref: int) -> list[int]:
-    """Devuelve la cadena lógica del campo y todos sus descendientes /Kids."""
-    chain = list(field_chain(doc, xref))
-    if not chain:
-        return []
-    root = chain[-1]
-    seen = set(chain)
-    pending = [root]
-    while pending and len(seen) < 1000:
-        cur = pending.pop()
-        kids = get_value(doc, cur, "Kids")
-        if isinstance(kids, ArrayObject):
-            for k in kids:
-                if isinstance(k, IndirectObject) and k.idnum > 0 and k.idnum not in seen:
-                    seen.add(k.idnum)
-                    chain.append(k.idnum)
-                    pending.append(k.idnum)
-    return chain
+    return terminal_field_nodes(doc, xref)
 
 
-def _field_has_phrase(doc, xref: int, phrase: str) -> bool:
+def _field_has_phrase(doc, xref: int, phrase: str, inspector=None) -> bool:
     phrase_low = phrase.casefold()
     for node in _field_family_xrefs(doc, xref):
         for key in ("V", "DV", "RV", "DS", "TU", "TM", "Opt"):
             for text_rep in get_text_representations(doc, node, key):
                 if _text_matches_phrase(text_rep, phrase_low):
                     return True
+        if inspector is not None and any(_text_matches_phrase(t, phrase_low) for t in inspector.texts(node)):
+            return True
     return False
 
 
-def _annot_has_phrase(doc, annot: fitz.Annot, phrase_low: str) -> bool:
+def _field_widget_pages(doc: fitz.Document) -> dict[int, set[int]]:
+    result: dict[int, set[int]] = {}
+    for pno, page in enumerate(doc):
+        for entry in page.annot_xrefs():
+            if entry[1] != fitz.PDF_ANNOT_WIDGET:
+                continue
+            owner = terminal_field_owner(doc, entry[0])
+            if owner is None:
+                raise ValueError("No se pudo inspeccionar un campo de formulario para censurarlo.")
+            result.setdefault(owner, set()).add(pno)
+    return result
+
+
+def _require_complete_field_scope(roots: set[int], selected: set[int], locations: dict[int, set[int]]) -> None:
+    if any(locations.get(root, set()) - selected for root in roots):
+        raise ValueError(
+            "Un campo afectado se comparte con páginas fuera del rango elegido. "
+            "Incluya todas las páginas de ese campo para censurarlo sin modificar páginas excluidas."
+        )
+
+
+def _annot_has_phrase(doc, annot: fitz.Annot, phrase_low: str, inspector=None) -> bool:
     info = annot.info or {}
     for k in ("content", "title", "subject"):
         if _text_matches_phrase(str(info.get(k, "") or ""), phrase_low):
@@ -110,6 +149,8 @@ def _annot_has_phrase(doc, annot: fitz.Annot, phrase_low: str) -> bool:
                 for text_rep in get_text_representations(doc, tx, key):
                     if _text_matches_phrase(text_rep, phrase_low):
                         return True
+            if inspector is not None and any(_text_matches_phrase(t, phrase_low) for t in inspector.texts(tx)):
+                return True
     return False
 
 
@@ -139,7 +180,7 @@ def _remove_xfa_completely(doc: fitz.Document) -> None:
     set_pdf_key_null(doc, cat, "AcroForm/XFA")
 
 
-def _wipe_indirect_key_value(doc: fitz.Document, xref: int, key: str) -> None:
+def _wipe_indirect_key_value(doc: fitz.Document, xref: int, key: str, protected=frozenset()) -> None:
     """Limpia tanto la clave en `xref` como cualquier stream u objeto indirecto referenciado por ella."""
     try:
         kind, val = doc.xref_get_key(xref, key)
@@ -148,7 +189,7 @@ def _wipe_indirect_key_value(doc: fitz.Document, xref: int, key: str) -> None:
     if kind == "xref":
         try:
             ref_id = int(val.split()[0])
-            if ref_id > 0:
+            if ref_id > 0 and ref_id not in protected:
                 if doc.xref_is_stream(ref_id):
                     doc.update_stream(ref_id, b"", compress=False)
                 doc.update_object(ref_id, "<< >>")
@@ -160,22 +201,31 @@ def _wipe_indirect_key_value(doc: fitz.Document, xref: int, key: str) -> None:
         pass
 
 
-def _wipe_field_nodes(doc: fitz.Document, nodes: list[int]) -> None:
+def _wipe_appearance_streams(doc, nodes, protected):
+    for node in nodes:
+        for stream in appearance_streams(doc, node):
+            if stream not in protected:
+                doc.update_stream(stream, b"", compress=False)
+                doc.update_object(stream, "<< >>")
+
+
+def _preserved_objects(doc, roots, annot_xrefs):
+    excluded = {node for root in roots for node in _field_family_xrefs(doc, root)}
+    for xref in annot_xrefs:
+        excluded.add(xref)
+        kind, raw = doc.xref_get_key(xref, "Popup")
+        if kind == "xref":
+            excluded.add(int(raw.split()[0]))
+    return reachable_xrefs(doc, excluded=excluded)
+
+
+def _wipe_field_nodes(doc: fitz.Document, nodes: list[int], protected: set[int]) -> None:
+    _wipe_appearance_streams(doc, nodes, protected)
     for node in nodes:
         for key in ("V", "DV", "RV", "DS", "TU", "TM", "Opt", "I", "T"):
-            _wipe_indirect_key_value(doc, node, key)
-        for ap_sub in ("AP/N", "AP/R", "AP/D"):
-            try:
-                ak, av = doc.xref_get_key(node, ap_sub)
-                if ak == "xref":
-                    ap_id = int(av.split()[0])
-                    if doc.xref_is_stream(ap_id):
-                        doc.update_stream(ap_id, b"", compress=False)
-                    doc.update_object(ap_id, "<< >>")
-            except Exception:
-                pass
+            _wipe_indirect_key_value(doc, node, key, protected)
         for key in ("AP", "AS"):
-            _wipe_indirect_key_value(doc, node, key)
+            _wipe_indirect_key_value(doc, node, key, protected)
 
 
 def add_text_box(
@@ -235,7 +285,7 @@ def add_text_box(
         raise ValueError("El texto excede el espacio disponible en la página y no pudo insertarse.")
 
 
-def _delete_widget_completely(doc: fitz.Document, page: fitz.Page, w: fitz.Widget) -> None:
+def _delete_widget_completely(doc: fitz.Document, page: fitz.Page, w: fitz.Widget, protected: set[int]) -> None:
     """Limpia valores, representaciones enriquecidas (/RV), padres y apariencias del widget (H45, V02)."""
     xref = getattr(w, "xref", 0) or 0
     nodes = _field_family_xrefs(doc, xref) if xref > 0 else []
@@ -243,10 +293,10 @@ def _delete_widget_completely(doc: fitz.Document, page: fitz.Page, w: fitz.Widge
         page.delete_widget(w)
     except Exception:
         pass
-    _wipe_field_nodes(doc, nodes)
+    _wipe_field_nodes(doc, nodes, protected)
 
 
-def _delete_annot_completely(doc: fitz.Document, page: fitz.Page, a: fitz.Annot) -> None:
+def _delete_annot_completely(doc: fitz.Document, page: fitz.Page, a: fitz.Annot, protected: set[int]) -> None:
     """Limpia contenido plano y enriquecido (/RC), popup y apariencias antes de borrar la anotación (V02)."""
     xref = getattr(a, "xref", 0) or 0
     target_xrefs: list[int] = []
@@ -262,19 +312,10 @@ def _delete_annot_completely(doc: fitz.Document, page: fitz.Page, a: fitz.Annot)
         page.delete_annot(a)
     except Exception:
         pass
+    _wipe_appearance_streams(doc, target_xrefs, protected)
     for tx in target_xrefs:
-        for ap_sub in ("AP/N", "AP/R", "AP/D"):
-            try:
-                ak, av = doc.xref_get_key(tx, ap_sub)
-                if ak == "xref":
-                    ap_id = int(av.split()[0])
-                    if doc.xref_is_stream(ap_id):
-                        doc.update_stream(ap_id, b"", compress=False)
-                    doc.update_object(ap_id, "<< >>")
-            except Exception:
-                pass
         for key in ("RC", "Contents", "T", "Subj", "DS", "AP", "Popup"):
-            _wipe_indirect_key_value(doc, tx, key)
+            _wipe_indirect_key_value(doc, tx, key, protected)
 
 
 def apply_redaction(
@@ -289,18 +330,21 @@ def apply_redaction(
     """Censura / redacta físicamente el área rectangular especificada."""
     from .security import UnsupportedActiveContentError, has_xfa
     page = doc[page_idx]
+    widgets_to_delete = [w for w in list(page.widgets()) if w.rect.intersects(rect)]
+    roots = {terminal_field_owner(doc, w.xref) for w in widgets_to_delete}
+    _require_complete_field_scope(roots, {page_idx}, _field_widget_pages(doc))
+    annots_to_delete = [a for a in page.annots() if a.rect.intersects(rect)]
+    protected = _preserved_objects(doc, roots, [a.xref for a in annots_to_delete])
     if has_xfa(doc):
         if not remove_xfa:
             raise UnsupportedActiveContentError(
                 "El PDF contiene XFA. Debe autorizar la eliminación de XFA para censurar el documento."
             )
         _remove_xfa_completely(doc)
-    widgets_to_delete = [w for w in list(page.widgets()) if w.rect.intersects(rect)]
     for w in widgets_to_delete:
-        _delete_widget_completely(doc, page, w)
-    for a in list(page.annots()):
-        if a.rect.intersects(rect):
-            _delete_annot_completely(doc, page, a)
+        _delete_widget_completely(doc, page, w, protected)
+    for a in annots_to_delete:
+        _delete_annot_completely(doc, page, a, protected)
     page.add_redact_annot(rect, text=text, fill=fill_color)
     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
 
@@ -319,6 +363,36 @@ def redact_search_phrase(
     if not phrase_clean:
         return 0
     phrase_low = phrase_clean.casefold()
+    target_pages = sorted(set(pages if pages is not None else range(doc.page_count)))
+    if not target_pages or any(p < 0 or p >= doc.page_count for p in target_pages):
+        raise ValueError("La selección de páginas no es válida.")
+    selected = set(target_pages)
+    field_locations = _field_widget_pages(doc)
+    owners = set(field_locations)
+    if len(selected) == doc.page_count:
+        owners.update(owner for x in iter_acroform_field_xrefs(doc)
+                      if (owner := terminal_field_owner(doc, x)) is not None)
+    else:
+        owners = {root for root in owners if field_locations[root] & selected}
+    matches_by_page = {pno: list(doc[pno].search_for(phrase_clean)) for pno in target_pages}
+    matched_annotations = set()
+    # Preflight antes de cualquier mutación, también para coincidencias que cruzan un widget.
+    with AppearanceInspector(doc) as inspector:
+        global_matched_roots = {root for root in owners if _field_has_phrase(doc, root, phrase_low, inspector)}
+        for pno in target_pages:
+            page = doc[pno]
+            for w in _safe_page_widgets(page):
+                if (any(w.rect.intersects(r) for r in matches_by_page[pno])
+                        or _field_has_phrase(doc, w.xref, phrase_low, inspector)
+                        or _text_matches_phrase(str(w.field_value or ""), phrase_low)
+                        or _text_matches_phrase(str(getattr(w, "field_label", "") or ""), phrase_low)):
+                    global_matched_roots.add(terminal_field_owner(doc, w.xref))
+            for a in page.annots():
+                if (any(a.rect.intersects(r) for r in matches_by_page[pno])
+                        or _annot_has_phrase(doc, a, phrase_low, inspector)):
+                    matched_annotations.add(a.xref)
+    _require_complete_field_scope(global_matched_roots, selected, field_locations)
+    protected = _preserved_objects(doc, global_matched_roots, matched_annotations)
     if has_xfa(doc):
         if remove_xfa:
             _remove_xfa_completely(doc)
@@ -327,21 +401,11 @@ def redact_search_phrase(
                 "El PDF contiene datos XFA alternativos con el texto buscado. "
                 "Autorice la eliminación de XFA para evitar conservar el secreto."
             )
-    target_pages = pages if pages is not None else range(doc.page_count)
     total_matches = 0
-
-    # Pre-inspeccionar el árbol canónico /AcroForm/Fields para capturar familias de campos
-    # incluso cuando tienen representación dividida o sin widget cargado en página.
-    global_matched_roots: set[int] = set()
-    for af_xref in iter_acroform_field_xrefs(doc):
-        if _field_has_phrase(doc, af_xref, phrase_low):
-            chain = list(field_chain(doc, af_xref))
-            if chain:
-                global_matched_roots.add(chain[-1])
 
     for pno in target_pages:
         page = doc[pno]
-        matches = list(page.search_for(phrase_clean))
+        matches = matches_by_page[pno]
         redact_rects: list[fitz.Rect] = [
             fitz.Rect(r.x0 - 0.5, r.y0 - 0.5, r.x1 + 0.5, r.y1 + 0.5) for r in matches
         ]
@@ -354,8 +418,7 @@ def redact_search_phrase(
         handled_roots_on_page: set[int] = set()
         for w in page_widgets:
             w_rect = fitz.Rect(w.rect)
-            chain = list(field_chain(doc, w.xref))
-            root_xref = chain[-1] if chain else w.xref
+            root_xref = terminal_field_owner(doc, w.xref)
             intersects_match = any(w_rect.intersects(r) for r in matches)
             has_secret_val = (
                 _text_matches_phrase(str(w.field_value or ""), phrase_low)
@@ -372,7 +435,7 @@ def redact_search_phrase(
                 if not intersects_match:
                     page_hits += 1
                 redact_rects.append(w_rect)
-                _delete_widget_completely(doc, page, w)
+                _delete_widget_completely(doc, page, w, protected)
 
         # Si hay widgets en Annots cuya carga como fitz.Widget falló pero pertenecen a una familia afectada
         try:
@@ -380,8 +443,7 @@ def redact_search_phrase(
         except Exception:
             raw_annot_xrefs = []
         for axref in raw_annot_xrefs:
-            chain = list(field_chain(doc, axref))
-            root_xref = chain[-1] if chain else axref
+            root_xref = terminal_field_owner(doc, axref)
             if root_xref in matched_roots and root_xref not in handled_roots_on_page:
                 handled_roots_on_page.add(root_xref)
                 page_hits += 1
@@ -391,7 +453,7 @@ def redact_search_phrase(
                         redact_rects.append(fitz.Rect(*[float(x) for x in rect_obj]))
                     except Exception:
                         pass
-                _wipe_field_nodes(doc, _field_family_xrefs(doc, root_xref))
+                _wipe_field_nodes(doc, _field_family_xrefs(doc, root_xref), protected)
 
         try:
             page_annots = list(page.annots())
@@ -401,7 +463,7 @@ def redact_search_phrase(
         for a in page_annots:
             a_rect = fitz.Rect(a.rect)
             intersects_match = any(a_rect.intersects(r) for r in matches)
-            has_secret_annot = _annot_has_phrase(doc, a, phrase_low)
+            has_secret_annot = a.xref in matched_annotations
             annot_decisions.append((a, a_rect, intersects_match, has_secret_annot))
 
         for a, a_rect, intersects_match, has_secret_annot in annot_decisions:
@@ -409,7 +471,7 @@ def redact_search_phrase(
                 if not intersects_match:
                     page_hits += 1
                 redact_rects.append(a_rect)
-                _delete_annot_completely(doc, page, a)
+                _delete_annot_completely(doc, page, a, protected)
 
         if redact_rects:
             for r in redact_rects:
@@ -431,7 +493,7 @@ def redact_search_phrase(
     if global_matched_roots:
         for root_xref in global_matched_roots:
             nodes = _field_family_xrefs(doc, root_xref)
-            _wipe_field_nodes(doc, nodes)
+            _wipe_field_nodes(doc, nodes, protected)
         if total_matches == 0:
             total_matches = len(global_matched_roots)
     return total_matches
@@ -520,34 +582,39 @@ def sample_visual_colors(
 ) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
     """Muestrea los píxeles de la región para detectar color de texto, color de fondo y densidad de trazo."""
     try:
-        pix = page.get_pixmap(clip=bbox * page.rotation_matrix, dpi=150)
+        pix = render_bounded_pixmap(page, clip=bbox * page.rotation_matrix,
+                                   dpi=150, max_pixels=MAX_SAMPLE_PIXELS)
         if pix.width < 2 or pix.height < 2:
             return (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), 0.0
 
         from collections import Counter
-        pixels = []
-        for y in range(pix.height):
-            for x in range(pix.width):
-                r, g, b = pix.pixel(x, y)[:3]
-                pixels.append((r, g, b))
+        data = pix.samples
+        counts = Counter(zip(data[0::pix.n], data[1::pix.n], data[2::pix.n]))
 
         # El color más frecuente es el fondo
-        bg_cand = Counter(pixels).most_common(1)[0][0]
+        bg_cand = counts.most_common(1)[0][0]
         bg_r, bg_g, bg_b = bg_cand
 
         # Píxeles de texto: aquellos que difieren sustancialmente del fondo
         def dist_sq(p):
             return (p[0] - bg_r) ** 2 + (p[1] - bg_g) ** 2 + (p[2] - bg_b) ** 2
 
-        text_pixels = [p for p in pixels if dist_sq(p) > 1600]
-        density = len(text_pixels) / len(pixels)
+        text_counts = [(p, n) for p, n in counts.items() if dist_sq(p) > 1600]
+        text_count = sum(n for _, n in text_counts)
+        density = text_count / (pix.width * pix.height)
 
-        if text_pixels:
-            text_pixels.sort(key=lambda p: 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2])
-            core = text_pixels[: max(1, len(text_pixels) // 2)]
-            avg_r = sum(p[0] for p in core) / len(core) / 255.0
-            avg_g = sum(p[1] for p in core) / len(core) / 255.0
-            avg_b = sum(p[2] for p in core) / len(core) / 255.0
+        if text_count:
+            text_counts.sort(key=lambda item: 0.299 * item[0][0] + 0.587 * item[0][1] + 0.114 * item[0][2])
+            core_size = remaining = max(1, text_count // 2)
+            sums = [0, 0, 0]
+            for color, count in text_counts:
+                take = min(remaining, count)
+                for channel in range(3):
+                    sums[channel] += color[channel] * take
+                remaining -= take
+                if not remaining:
+                    break
+            avg_r, avg_g, avg_b = (value / core_size / 255.0 for value in sums)
 
             lum = 0.299 * avg_r + 0.587 * avg_g + 0.114 * avg_b
             spread = max(avg_r, avg_g, avg_b) - min(avg_r, avg_g, avg_b)
@@ -867,15 +934,15 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
         search_rect = fitz.Rect(
             bbox.x0 - margin, bbox.y0 - margin, bbox.x1 + margin, bbox.y1 + margin
         ).intersect(page.rect)
-        scale = 150.0 / 72.0
-        pix = page.get_pixmap(clip=search_rect, dpi=150)
+        pix = render_bounded_pixmap(page, clip=search_rect, dpi=150, max_pixels=MAX_SAMPLE_PIXELS)
         if pix.width < 10 or pix.height < 10:
             return None
 
-        tb_x0 = int((bbox.x0 - search_rect.x0) * scale)
-        tb_y0 = int((bbox.y0 - search_rect.y0) * scale)
-        tb_x1 = int((bbox.x1 - search_rect.x0) * scale)
-        tb_y1 = int((bbox.y1 - search_rect.y0) * scale)
+        scale_x, scale_y = pix.width / search_rect.width, pix.height / search_rect.height
+        tb_x0 = int((bbox.x0 - search_rect.x0) * scale_x)
+        tb_y0 = int((bbox.y0 - search_rect.y0) * scale_y)
+        tb_x1 = int((bbox.x1 - search_rect.x0) * scale_x)
+        tb_y1 = int((bbox.y1 - search_rect.y0) * scale_y)
 
         top_y, bot_y, left_x, right_x = None, None, None, None
         for y in range(0, min(pix.height, tb_y0 + 8)):
@@ -916,10 +983,10 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
 
         if top_y is not None and bot_y is not None and left_x is not None and right_x is not None:
             detected_card = fitz.Rect(
-                search_rect.x0 + left_x / scale,
-                search_rect.y0 + top_y / scale,
-                search_rect.x0 + right_x / scale,
-                search_rect.y0 + bot_y / scale,
+                search_rect.x0 + left_x / scale_x,
+                search_rect.y0 + top_y / scale_y,
+                search_rect.x0 + right_x / scale_x,
+                search_rect.y0 + bot_y / scale_y,
             )
             return detected_card
     except Exception:
@@ -1080,13 +1147,16 @@ def replace_text_block(
                 "El nuevo texto excede el espacio disponible en la página y no pudo insertarse sin pérdida de datos."
             )
 
-    # Eliminar cualquier campo interactivo (widget/AcroForm) o anotación que coincida con la zona de redacción
-    for w in list(page.widgets()):
-        if w.rect.intersects(redact_rect):
-            _delete_widget_completely(doc, page, w)
-    for a in list(page.annots()):
-        if a.rect.intersects(redact_rect):
-            page.delete_annot(a)
+    # Aplicar las mismas garantías de alcance y recursos que la censura manual.
+    widgets = [w for w in page.widgets() if w.rect.intersects(redact_rect)]
+    annots = [a for a in page.annots() if a.rect.intersects(redact_rect)]
+    roots = {terminal_field_owner(doc, w.xref) for w in widgets}
+    _require_complete_field_scope(roots, {page_idx}, _field_widget_pages(doc))
+    protected = _preserved_objects(doc, roots, [a.xref for a in annots])
+    for w in widgets:
+        _delete_widget_completely(doc, page, w, protected)
+    for a in annots:
+        _delete_annot_completely(doc, page, a, protected)
 
     # Redactar texto existente (evitando eliminar trazados vectoriales)
     page.add_redact_annot(redact_rect, fill=fill_color)
