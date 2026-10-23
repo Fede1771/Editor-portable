@@ -233,20 +233,34 @@ class CommentTree(QTreeWidget):
         return total_comments
 
 
+import weakref
+
+_ACTIVE_SNAPSHOTS: "weakref.WeakSet[_DocSnapshot]" = weakref.WeakSet()
+
+
+def _on_private_mode_changed(enabled: bool) -> None:
+    """Migra inmediatamente a RAM y destruye en disco cualquier snapshot previo al activar modo privado (H46)."""
+    if enabled:
+        for snap in list(_ACTIVE_SNAPSHOTS):
+            snap.migrate_to_ram()
+
+
 class _DocSnapshot:
     """Instantánea de documento para Undo/Redo.
     Para PDFs estándar (<15 MB) permanece en memoria RAM para máxima velocidad.
     Para PDFs de gran peso (>=15 MB) se vuelca temporalmente a disco para evitar
-    saturación de memoria.
+    saturación de memoria, salvo en modo privado donde siempre reside en RAM (H46).
     """
 
     DISK_THRESHOLD = 15 * 1024 * 1024  # 15 MB
 
     def __init__(self, data: bytes):
+        from .privacy import is_private_mode, register_private_mode_hook, TempManager
+
+        register_private_mode_hook(_on_private_mode_changed)
         self._size = len(data)
         self._temp_path: str | None = None
         if self._size >= self.DISK_THRESHOLD:
-            from .privacy import is_private_mode, TempManager
             if is_private_mode():
                 # En modo privado / cero huella, preservar siempre en RAM para no tocar el disco
                 self._data = data
@@ -258,6 +272,21 @@ class _DocSnapshot:
                 self._data = None
         else:
             self._data = data
+        _ACTIVE_SNAPSHOTS.add(self)
+
+    def migrate_to_ram(self) -> None:
+        """Si la instantánea está en disco, la carga en RAM y destruye el archivo temporal (H46)."""
+        if self._temp_path:
+            if self._data is None and os.path.isfile(self._temp_path):
+                with open(self._temp_path, "rb") as f:
+                    self._data = f.read()
+            old_path = self._temp_path
+            self._temp_path = None
+            try:
+                from .privacy import TempManager
+                TempManager.cleanup_path(old_path)
+            except Exception:
+                pass
 
     def get_bytes(self) -> bytes:
         if self._data is not None:
@@ -269,12 +298,13 @@ class _DocSnapshot:
 
     def cleanup(self) -> None:
         if self._temp_path:
+            old_path = self._temp_path
+            self._temp_path = None
             try:
                 from .privacy import TempManager
-                TempManager.cleanup_path(self._temp_path)
+                TempManager.cleanup_path(old_path)
             except Exception:
                 pass
-            self._temp_path = None
         self._data = None
 
     def __del__(self):
@@ -294,6 +324,14 @@ class DocTab(QWidget):
         self.modified = False
         self.save_as_only = False
         self.suggested = "documento.pdf"
+        self._auth_password: str | None = getattr(doc, "_editorpdf_password", None)
+        self._source_bytes: bytes | None = getattr(doc, "_editorpdf_source_bytes", None)
+        if self._source_bytes is None and path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as fh:
+                    self._source_bytes = fh.read()
+            except Exception:
+                self._source_bytes = None
         self._undo: list[_DocSnapshot] = []
         self._redo: list[_DocSnapshot] = []
 
@@ -394,7 +432,11 @@ class DocTab(QWidget):
         """Desactiva y remueve permanentemente scripts y acciones del documento."""
         from .security import sanitize_document
         self.run_edit(lambda d: sanitize_document(d))
-        self.security_banner.show_cleaned()
+        sec = scan_document_security(self.doc)
+        if sec.get("has_threats"):
+            self.security_banner.show_threats(sec)
+        else:
+            self.security_banner.show_cleaned()
 
     def _on_attachment_changed(self):
         self.modified = True
@@ -584,14 +626,25 @@ class DocTab(QWidget):
     def can_redo(self) -> bool:
         return bool(self._redo)
 
+    def _serialize_doc_bytes(self) -> bytes:
+        """Serializa el documento actual preservando su política de cifrado si fue autenticado (H04)."""
+        if self._auth_password is None:
+            self._auth_password = getattr(self.doc, "_editorpdf_password", None)
+        if self._auth_password is not None:
+            try:
+                return self.doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP)
+            except Exception:
+                pass
+        return self.doc.tobytes()
+
     def run_edit(self, fn, select: list[int] | None = None, goto: int | None = None):
         """Aplica `fn(doc)` guardando una copia para deshacer. Si falla, restaura el documento."""
-        snapshot = _DocSnapshot(self.doc.tobytes())
+        snapshot = _DocSnapshot(self._serialize_doc_bytes())
         try:
             fn(self.doc)
         except Exception:
             self._load_bytes(snapshot.get_bytes())
-            self.view.reload(self.doc)
+            self._refresh()
             snapshot.cleanup()
             raise
         self._undo.append(snapshot)
@@ -600,34 +653,44 @@ class DocTab(QWidget):
             old_snap.cleanup()
         self._clear_snapshots(self._redo)
         self.modified = True
+        self._source_bytes = None
         self._refresh(select, goto)
 
     def undo(self):
         if self._undo:
             snap = self._undo.pop()
-            self._redo.append(_DocSnapshot(self.doc.tobytes()))
+            self._redo.append(_DocSnapshot(self._serialize_doc_bytes()))
             while len(self._redo) > UNDO_LIMIT:
                 old_snap = self._redo.pop(0)
                 old_snap.cleanup()
             self._load_bytes(snap.get_bytes())
             snap.cleanup()
             self.modified = True
+            self._source_bytes = None
             self._refresh()
 
     def redo(self):
         if self._redo:
             snap = self._redo.pop()
-            self._undo.append(_DocSnapshot(self.doc.tobytes()))
+            self._undo.append(_DocSnapshot(self._serialize_doc_bytes()))
             while len(self._undo) > UNDO_LIMIT:
                 old_snap = self._undo.pop(0)
                 old_snap.cleanup()
             self._load_bytes(snap.get_bytes())
             snap.cleanup()
             self.modified = True
+            self._source_bytes = None
             self._refresh()
 
     def _load_bytes(self, data: bytes):
         new = fitz.open("pdf", data)
+        if new.needs_pass and self._auth_password is not None:
+            new.authenticate(self._auth_password)
+        if self._auth_password is not None:
+            try:
+                setattr(new, "_editorpdf_password", self._auth_password)
+            except Exception:
+                pass
         old = self.doc
         self.doc = new
         self.thumbs.doc = new
@@ -642,6 +705,7 @@ class DocTab(QWidget):
         self.comments.load(self.doc)
         self.attachments.reload()
         self._sync_side_tabs()
+        self.check_security()
         if goto is not None:
             self.view.goto_page(goto)
         elif select:
@@ -657,16 +721,39 @@ class DocTab(QWidget):
 
     # ---------------------------------------------------------------- guardar
     def save(self, path: str | None = None):
-        """Guarda de forma segura (archivo temporal + reemplazo)."""
-        target = path or self.path
-        tmp = target + ".tmp"
+        """Guarda de forma segura (temporal único propio + reemplazo, preservando cifrado y firmas sin editar)."""
+        target = os.path.abspath(path or self.path)
+        target_dir = os.path.dirname(target) or "."
+        os.makedirs(target_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix=f".{os.path.basename(target)}.",
+            suffix=".tmp",
+            dir=target_dir,
+        )
+        os.close(fd)
+        own_tmp = True
         try:
-            self.doc.save(tmp, garbage=3, deflate=True)
+            if not self.modified and self._source_bytes is not None:
+                # H49: sin modificaciones, conservar representación binaria exacta (incluye /ByteRange firmados)
+                with open(tmp, "wb") as fh:
+                    fh.write(self._source_bytes)
+            else:
+                # H04: conservar la política de cifrado del documento al guardar
+                self.doc.save(tmp, garbage=3, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
             os.replace(tmp, target)
+            own_tmp = False
         finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        self.path = target
+            if own_tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        try:
+            with open(target, "rb") as fh:
+                self._source_bytes = fh.read()
+        except Exception:
+            pass
+        self.path = path or self.path
         self.modified = False
         self.edited.emit()
 

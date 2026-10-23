@@ -2,7 +2,8 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from .settings_store import app_settings
 from PySide6.QtGui import QCursor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -27,7 +28,7 @@ def get_recent_files() -> list[str]:
     from .privacy import is_private_mode
     if is_private_mode():
         return []
-    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    settings = app_settings()
     val = settings.value(KEY_RECENT_FILES, [])
     if isinstance(val, str):
         return [val] if val else []
@@ -48,12 +49,12 @@ def add_recent_file(file_path: str) -> None:
         current.remove(file_path)
     current.insert(0, file_path)
     current = current[:MAX_RECENT_FILES]
-    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    settings = app_settings()
     settings.setValue(KEY_RECENT_FILES, current)
 
 
 def clear_recent_files() -> None:
-    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    settings = app_settings()
     settings.setValue(KEY_RECENT_FILES, [])
 
 

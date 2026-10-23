@@ -26,9 +26,11 @@ def add_text_box(
         h = max(30.0, fontsize * 2.5)
         rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + w, rect.y0 + h)
 
-    # Insertar texto dentro del rectángulo
-    rc = page.insert_textbox(
-        rect,
+    # Verificar primero en un shape temporal si cabe en rect o en expanded_rect (H07)
+    target_rect = rect
+    test_shape = page.new_shape()
+    rc = test_shape.insert_textbox(
+        target_rect,
         text,
         fontsize=fontsize,
         fontname=fontname,
@@ -36,9 +38,9 @@ def add_text_box(
         align=align,
     )
     if rc < 0:
-        # Si el texto excede el rectángulo inicial, expandir verticalmente
         expanded_rect = fitz.Rect(rect.x0, rect.y0, max(rect.x1, page.rect.width - 20), page.rect.height - 20)
-        page.insert_textbox(
+        test_shape2 = page.new_shape()
+        rc = test_shape2.insert_textbox(
             expanded_rect,
             text,
             fontsize=fontsize,
@@ -46,6 +48,39 @@ def add_text_box(
             color=color,
             align=align,
         )
+        if rc < 0:
+            raise ValueError("El texto excede el espacio disponible en la página y no pudo insertarse.")
+        target_rect = expanded_rect
+
+    final_rc = page.insert_textbox(
+        target_rect,
+        text,
+        fontsize=fontsize,
+        fontname=fontname,
+        color=color,
+        align=align,
+    )
+    if final_rc < 0:
+        raise ValueError("El texto excede el espacio disponible en la página y no pudo insertarse.")
+
+
+def _delete_widget_completely(doc: fitz.Document, page: fitz.Page, w: fitz.Widget) -> None:
+    """Limpia valores y apariencias del widget y lo elimina de la página (H45)."""
+    xref = getattr(w, "xref", 0) or 0
+    try:
+        w.field_value = ""
+    except Exception:
+        pass
+    if xref > 0:
+        for key in ("V", "DV", "AP", "AS", "TU", "TM"):
+            try:
+                doc.xref_set_key(xref, key, "null")
+            except Exception:
+                pass
+    try:
+        page.delete_widget(w)
+    except Exception:
+        pass
 
 
 def apply_redaction(
@@ -59,12 +94,12 @@ def apply_redaction(
     page = doc[page_idx]
     for w in list(page.widgets()):
         if w.rect.intersects(rect):
-            page.delete_widget(w)
+            _delete_widget_completely(doc, page, w)
     for a in list(page.annots()):
         if a.rect.intersects(rect):
             page.delete_annot(a)
     page.add_redact_annot(rect, text=text, fill=fill_color)
-    page.apply_redactions()
+    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
 
 
 def redact_search_phrase(
@@ -73,19 +108,66 @@ def redact_search_phrase(
     pages: Sequence[int] | None = None,
     fill_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> int:
-    """Busca una frase y redacta físicamente todas sus ocurrencias."""
-    if not phrase.strip():
+    """Busca una frase y redacta físicamente todas sus ocurrencias en texto, formularios y anotaciones (H45)."""
+    phrase_clean = phrase.strip()
+    if not phrase_clean:
         return 0
+    phrase_low = phrase_clean.lower()
     target_pages = pages if pages is not None else range(doc.page_count)
     total_matches = 0
     for pno in target_pages:
         page = doc[pno]
-        matches = page.search_for(phrase)
-        if matches:
-            total_matches += len(matches)
-            for r in matches:
+        matches = list(page.search_for(phrase_clean))
+        redact_rects: list[fitz.Rect] = [
+            fitz.Rect(r.x0 - 0.5, r.y0 - 0.5, r.x1 + 0.5, r.y1 + 0.5) for r in matches
+        ]
+        page_hits = len(matches)
+
+        for w in list(page.widgets()):
+            w_rect = fitz.Rect(w.rect)
+            val_str = str(w.field_value or "").lower()
+            lbl_str = str(getattr(w, "field_label", "") or "").lower()
+            intersects_match = any(w_rect.intersects(r) for r in matches)
+            has_secret_val = (phrase_low in val_str) or (phrase_low in lbl_str)
+            if intersects_match or has_secret_val:
+                if not intersects_match:
+                    page_hits += 1
+                redact_rects.append(w_rect)
+                _delete_widget_completely(doc, page, w)
+
+        for a in list(page.annots()):
+            a_rect = fitz.Rect(a.rect)
+            info = a.info or {}
+            content_str = " ".join(
+                str(info.get(k, "") or "") for k in ("content", "title", "subject")
+            ).lower()
+            intersects_match = any(a_rect.intersects(r) for r in matches)
+            has_secret_annot = phrase_low in content_str
+            if intersects_match or has_secret_annot:
+                if not intersects_match:
+                    page_hits += 1
+                redact_rects.append(a_rect)
+                try:
+                    page.delete_annot(a)
+                except Exception:
+                    pass
+
+        if redact_rects:
+            for r in redact_rects:
                 page.add_redact_annot(r, fill=fill_color)
-            page.apply_redactions()
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+            # Segunda pasada por si algún glifo o apariencia remanente quedó parcialmente fuera del bbox
+            residual = list(page.search_for(phrase_clean))
+            if residual:
+                for r in residual:
+                    page.add_redact_annot(
+                        fitz.Rect(r.x0 - 1.5, r.y0 - 1.5, r.x1 + 1.5, r.y1 + 1.5),
+                        fill=fill_color,
+                    )
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+            total_matches += page_hits
     return total_matches
 
 
@@ -115,7 +197,9 @@ def extract_images(
     out_dir: str,
     pages: Sequence[int] | None = None,
 ) -> list[str]:
-    """Extrae todas las imágenes incrustadas de las páginas indicadas."""
+    """Extrae todas las imágenes incrustadas de las páginas indicadas sin sobrescribir archivos existentes (H28)."""
+    from .attachments import unique_path
+
     os.makedirs(out_dir, exist_ok=True)
     target_pages = pages if pages is not None else range(doc.page_count)
     extracted_paths: list[str] = []
@@ -133,7 +217,7 @@ def extract_images(
             image_bytes = base_image["image"]
             image_ext = base_image["ext"]
             out_name = f"pagina_{pno + 1:03d}_img_{img_idx + 1:02d}.{image_ext}"
-            out_path = os.path.join(out_dir, out_name)
+            out_path = unique_path(os.path.join(out_dir, out_name))
             with open(out_path, "wb") as f:
                 f.write(image_bytes)
             extracted_paths.append(out_path)
@@ -270,13 +354,21 @@ def find_text_block_at(
         tb = fitz.Rect(target_span["bbox"])
         th = max(1.0, tb.height)
 
-        # Buscar todos los spans de la misma fila/renglón horizontal (evitando invadir filas adyacentes)
+        def _span_style_key(sp: dict) -> tuple[str, float, int]:
+            fn = sp.get("font", "").lower()
+            fl = sp.get("flags", 0)
+            sz = round(float(sp.get("size", 10.0)), 1)
+            col = int(sp.get("color", 0)) if isinstance(sp.get("color"), int) else 0
+            return (fn, sz, fl, col)
+
+        target_style = _span_style_key(target_span)
+
+        # Buscar los spans de la misma fila horizontal que compartan el mismo estilo (H30)
         row_spans = []
         for s in all_spans:
             sb = fitz.Rect(s["bbox"])
             sh = max(1.0, sb.height)
             v_overlap = max(0.0, min(tb.y1, sb.y1) - max(tb.y0, sb.y0))
-            # Pertenecen a la misma fila si comparten al menos el 45% de su altura vertical
             if v_overlap >= 0.45 * min(th, sh):
                 row_spans.append(s)
 
@@ -292,7 +384,7 @@ def find_text_block_at(
             cur_x0 = row_spans[target_idx]["bbox"][0]
             for i in range(target_idx - 1, -1, -1):
                 s = row_spans[i]
-                if cur_x0 - s["bbox"][2] <= 45.0:
+                if cur_x0 - s["bbox"][2] <= 12.0 and _span_style_key(s) == target_style:
                     left_spans.append(s)
                     cur_x0 = s["bbox"][0]
                 else:
@@ -303,7 +395,7 @@ def find_text_block_at(
             cur_x1 = row_spans[target_idx]["bbox"][2]
             for i in range(target_idx + 1, len(row_spans)):
                 s = row_spans[i]
-                if s["bbox"][0] - cur_x1 <= 45.0:
+                if s["bbox"][0] - cur_x1 <= 12.0 and _span_style_key(s) == target_style:
                     right_spans.append(s)
                     cur_x1 = s["bbox"][2]
                 else:
@@ -311,7 +403,7 @@ def find_text_block_at(
 
             cluster = left_spans + [row_spans[target_idx]] + right_spans
         else:
-            cluster = row_spans
+            cluster = [target_span]
 
     if not cluster:
         return None
@@ -353,10 +445,12 @@ def find_text_block_at(
     avg_line_height = bbox.height / num_lines
     visual_fs = round(avg_line_height * 0.78, 1)
 
-    # 1. Detección automática del color (PDF nativo vs muestreo visual)
+    # 1. Detección automática del color (PDF nativo vs muestreo visual en OCR) (H30)
     sampled_text_col, sampled_bg_col, stroke_density = sample_visual_colors(page, bbox)
-    raw_col = s0.get("color", 0)
-    if isinstance(raw_col, int) and raw_col != 0:
+    raw_fn = s0.get("font", "").lower()
+    is_ocr = ("glyphless" in raw_fn) or ("tess" in raw_fn)
+    raw_col = s0.get("color", None)
+    if not is_ocr and isinstance(raw_col, int):
         r = ((raw_col >> 16) & 0xFF) / 255.0
         g = ((raw_col >> 8) & 0xFF) / 255.0
         b_c = (raw_col & 0xFF) / 255.0
@@ -366,8 +460,6 @@ def find_text_block_at(
 
     # 2. Detección automática del tamaño de fuente
     raw_fs = s0.get("size", 10.0)
-    raw_fn = s0.get("font", "").lower()
-    is_ocr = ("glyphless" in raw_fn) or ("tess" in raw_fn)
     is_corrupt_size = (raw_fs < 3.0) or (raw_fs > 120.0)
 
     if is_ocr or is_corrupt_size:
@@ -377,34 +469,61 @@ def find_text_block_at(
         font_size = round(raw_fs, 1)
 
     # 3. Detección automática de tipografía, negrita y cursiva
-    flags = s0.get("flags", 0)
-    if is_ocr:
-        # En OCR, GlyphLessFont tiene flags artificiales (12), por lo que por defecto es Sans-Serif (Helvetica)
-        family = "helv"
-    else:
-        if any(k in raw_fn for k in ("courier", "mono", "consolas", "typewriter", "code")) or (flags & 8):
-            family = "cour"
-        elif any(k in raw_fn for k in ("times", "serif", "roman", "georgia", "cambria", "garamond", "minion")) or (flags & 4):
-            family = "tiro"
+    def _resolve_span_font_code(sp: dict) -> tuple[str, tuple[float, float, float], float]:
+        sp_fn = sp.get("font", "").lower()
+        sp_flags = sp.get("flags", 0)
+        sp_ocr = ("glyphless" in sp_fn) or ("tess" in sp_fn)
+        if sp_ocr:
+            fam = "helv"
+        elif any(k in sp_fn for k in ("courier", "mono", "consolas", "typewriter", "code")) or (sp_flags & 8):
+            fam = "cour"
+        elif any(k in sp_fn for k in ("times", "serif", "roman", "georgia", "cambria", "garamond", "minion")) or (sp_flags & 4):
+            fam = "tiro"
         else:
-            family = "helv"
+            fam = "helv"
+        sp_bold = bool(sp_flags & 16) or any(
+            k in sp_fn for k in ("bold", "black", "heavy", "bld", "medium", "semibold", "w7", "w8", "w9")
+        )
+        if not sp_bold and sp_ocr and stroke_density >= 0.28:
+            sp_bold = True
+        sp_it = bool(sp_flags & 2) or any(
+            k in sp_fn for k in ("italic", "oblique", "it", "slanted", "kursiv")
+        )
+        if fam == "tiro":
+            fcode = "tibi" if (sp_bold and sp_it) else ("tibo" if sp_bold else ("tiit" if sp_it else "tiro"))
+        elif fam == "cour":
+            fcode = "cobi" if (sp_bold and sp_it) else ("cobo" if sp_bold else ("coit" if sp_it else "cour"))
+        else:
+            fcode = "hebi" if (sp_bold and sp_it) else ("hebo" if sp_bold else ("heit" if sp_it else "helv"))
+        sp_col_raw = sp.get("color", None)
+        if not sp_ocr and isinstance(sp_col_raw, int):
+            sp_col = (
+                round(((sp_col_raw >> 16) & 0xFF) / 255.0, 2),
+                round(((sp_col_raw >> 8) & 0xFF) / 255.0, 2),
+                round((sp_col_raw & 0xFF) / 255.0, 2),
+            )
+        else:
+            sp_col = sampled_text_col
+        sp_fs = float(sp.get("size", font_size))
+        if sp_ocr or sp_fs < 3.0 or sp_fs > 120.0:
+            sp_fs = font_size
+        return fcode, sp_col, round(sp_fs, 1)
 
-    is_bold = bool(flags & 16) or any(
-        k in raw_fn for k in ("bold", "black", "heavy", "bld", "medium", "semibold", "w7", "w8", "w9")
-    )
-    if not is_bold and is_ocr and stroke_density >= 0.28:
-        is_bold = True
+    font_code, font_color, font_size = _resolve_span_font_code(s0)
 
-    is_italic = bool(flags & 2) or any(
-        k in raw_fn for k in ("italic", "oblique", "it", "slanted", "kursiv")
-    )
-
-    if family == "tiro":
-        font_code = "tibi" if (is_bold and is_italic) else ("tibo" if is_bold else ("tiit" if is_italic else "tiro"))
-    elif family == "cour":
-        font_code = "cobi" if (is_bold and is_italic) else ("cobo" if is_bold else ("coit" if is_italic else "cour"))
-    else:
-        font_code = "hebi" if (is_bold and is_italic) else ("hebo" if is_bold else ("heit" if is_italic else "helv"))
+    runs = []
+    style_set = set()
+    for sp in cluster:
+        fc, col, fs = _resolve_span_font_code(sp)
+        style_set.add((fc, col, fs))
+        runs.append({
+            "text": sp.get("text", "").strip(),
+            "bbox": fitz.Rect(sp["bbox"]),
+            "fontname": fc,
+            "color": col,
+            "fontsize": fs,
+        })
+    has_mixed_styles = len(style_set) > 1
 
     # 4. Detección automática de alineación
     detected_align = fitz.TEXT_ALIGN_LEFT
@@ -439,6 +558,8 @@ def find_text_block_at(
         "fill_color": sampled_bg_col,
         "align": detected_align,
         "card_border": card_border,
+        "runs": runs,
+        "has_mixed_styles": has_mixed_styles,
     }
 
 
@@ -607,10 +728,93 @@ def replace_text_block(
 
         target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y0 + actual_h)
 
+    cleaned_text = new_text.strip()
+    final_rect = target_rect
+    final_fs = fontsize
+
+    # H06: Antes de borrar el texto original, verificar en memoria si el nuevo texto cabe
+    if cleaned_text:
+        fitted = False
+        if autofit:
+            curr_fs = fontsize
+            while curr_fs >= 4.5:
+                tshape = page.new_shape()
+                rc = tshape.insert_textbox(
+                    target_rect,
+                    cleaned_text,
+                    fontsize=curr_fs,
+                    fontname=fontname,
+                    color=color,
+                    align=align,
+                )
+                if rc >= 0:
+                    fitted = True
+                    final_fs = curr_fs
+                    final_rect = target_rect
+                    break
+                curr_fs -= 0.5
+            if not fitted and card_border is None:
+                expanded = fitz.Rect(
+                    target_rect.x0,
+                    target_rect.y0,
+                    min(page.rect.width - 6.0, target_rect.x1 + 30.0),
+                    page.rect.height - 6.0,
+                )
+                tshape = page.new_shape()
+                rc = tshape.insert_textbox(
+                    expanded,
+                    cleaned_text,
+                    fontsize=4.5,
+                    fontname=fontname,
+                    color=color,
+                    align=align,
+                )
+                if rc >= 0:
+                    fitted = True
+                    final_fs = 4.5
+                    final_rect = expanded
+        else:
+            tshape = page.new_shape()
+            rc = tshape.insert_textbox(
+                target_rect,
+                cleaned_text,
+                fontsize=fontsize,
+                fontname=fontname,
+                color=color,
+                align=align,
+            )
+            if rc >= 0:
+                fitted = True
+                final_rect = target_rect
+            elif card_border is None:
+                expanded = fitz.Rect(
+                    target_rect.x0,
+                    target_rect.y0,
+                    min(page.rect.width - 6.0, target_rect.x1 + 30.0),
+                    page.rect.height - 6.0,
+                )
+                tshape = page.new_shape()
+                rc = tshape.insert_textbox(
+                    expanded,
+                    cleaned_text,
+                    fontsize=fontsize,
+                    fontname=fontname,
+                    color=color,
+                    align=align,
+                )
+                if rc >= 0:
+                    fitted = True
+                    final_rect = expanded
+
+        if not fitted:
+            raise ValueError(
+                "El nuevo texto excede el espacio disponible en la página y no pudo insertarse sin pérdida de datos."
+            )
+
     # Eliminar cualquier campo interactivo (widget/AcroForm) o anotación que coincida con la zona de redacción
     for w in list(page.widgets()):
         if w.rect.intersects(redact_rect):
-            page.delete_widget(w)
+            _delete_widget_completely(doc, page, w)
     for a in list(page.annots()):
         if a.rect.intersects(redact_rect):
             page.delete_annot(a)
@@ -619,9 +823,7 @@ def replace_text_block(
     page.add_redact_annot(redact_rect, fill=fill_color)
     page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_NONE)
 
-    new_text = new_text.strip()
-    if not new_text:
-        # Si se vació y tenía recuadro, asegurar que el recuadro se mantenga nítido y visible
+    if not cleaned_text:
         if card_border is not None:
             shape = page.new_shape()
             shape.draw_rect(card_border)
@@ -629,62 +831,16 @@ def replace_text_block(
             shape.commit()
         return
 
-    # Inserción del nuevo texto respetando exactamente el tamaño de fuente elegido
-    if autofit:
-        curr_fs = fontsize
-        fitted = False
-        while curr_fs >= 4.5:
-            rc = page.insert_textbox(
-                target_rect,
-                new_text,
-                fontsize=curr_fs,
-                fontname=fontname,
-                color=color,
-                align=align,
-            )
-            if rc >= 0:
-                fitted = True
-                break
-            curr_fs -= 0.5
-        if not fitted:
-            if card_border is None:
-                expanded = fitz.Rect(target_rect.x0, target_rect.y0, min(page.rect.width - 6.0, target_rect.x1 + 30.0), page.rect.height - 6.0)
-                page.insert_textbox(
-                    expanded,
-                    new_text,
-                    fontsize=4.5,
-                    fontname=fontname,
-                    color=color,
-                    align=align,
-                )
-            else:
-                page.insert_textbox(
-                    target_rect,
-                    new_text,
-                    fontsize=4.5,
-                    fontname=fontname,
-                    color=color,
-                    align=align,
-                )
-    else:
-        rc = page.insert_textbox(
-            target_rect,
-            new_text,
-            fontsize=fontsize,
-            fontname=fontname,
-            color=color,
-            align=align,
-        )
-        if rc < 0 and card_border is None:
-            expanded = fitz.Rect(target_rect.x0, target_rect.y0, min(page.rect.width - 6.0, target_rect.x1 + 30.0), page.rect.height - 6.0)
-            page.insert_textbox(
-                expanded,
-                new_text,
-                fontsize=fontsize,
-                fontname=fontname,
-                color=color,
-                align=align,
-            )
+    rc = page.insert_textbox(
+        final_rect,
+        cleaned_text,
+        fontsize=final_fs,
+        fontname=fontname,
+        color=color,
+        align=align,
+    )
+    if rc < 0:
+        raise ValueError("No fue posible insertar el texto en el área seleccionada.")
 
     # Si había una tarjeta / recuadro, redibujar el contorno para garantizar máxima nitidez
     if card_border is not None:

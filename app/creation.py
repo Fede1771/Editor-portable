@@ -117,8 +117,12 @@ def _read_text(path: str) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+MAX_HTML_PAGES = 500
+
+
 def html_to_pdf(html: str, base_dir: str | None = None, css: str = "",
                 pagesize: fitz.Rect | None = None, margin: float = 50.0) -> fitz.Document:
+    """Convierte HTML a PDF con detección de falta de progreso y límite de páginas (H48)."""
     pagesize = pagesize or fitz.paper_rect("a4")
     where = pagesize + (margin, margin, -margin, -margin)
     archive = fitz.Archive(base_dir) if base_dir else None
@@ -126,11 +130,39 @@ def html_to_pdf(html: str, base_dir: str | None = None, css: str = "",
     buf = io.BytesIO()
     writer = fitz.DocumentWriter(buf)
     more = 1
-    while more:
-        dev = writer.begin_page(pagesize)
-        more, _ = story.place(where)
-        story.draw(dev)
-        writer.end_page()
+    page_count = 0
+    prev_filled: fitz.Rect | None = None
+    no_progress_streak = 0
+    try:
+        while more:
+            page_count += 1
+            if page_count > MAX_HTML_PAGES:
+                raise ValueError(
+                    f"El documento HTML supera el límite de {MAX_HTML_PAGES} páginas o contiene elementos no acomodables."
+                )
+            dev = writer.begin_page(pagesize)
+            more, filled = story.place(where)
+            story.draw(dev)
+            writer.end_page()
+
+            if more:
+                filled_rect = fitz.Rect(filled)
+                # Si place() no logra acomodar el elemento (filled muy pequeño o idéntico repetidamente sin llenar la página)
+                if prev_filled is not None and filled_rect == prev_filled and filled_rect.height < where.height * 0.25:
+                    no_progress_streak += 1
+                    if no_progress_streak >= 2:
+                        raise ValueError(
+                            "El contenido HTML contiene elementos que exceden el área imprimible de la página y no pueden paginarse."
+                        )
+                else:
+                    no_progress_streak = 0
+                prev_filled = filled_rect
+    except Exception:
+        try:
+            writer.close()
+        except Exception:
+            pass
+        raise
     writer.close()
     return fitz.open("pdf", buf.getvalue())
 
@@ -159,32 +191,39 @@ def find_soffice() -> str | None:
 
 
 def office_to_pdf_file(path: str, out_dir: str, timeout: int = 240) -> str:
-    """Convierte con LibreOffice y devuelve la ruta del PDF generado."""
+    """Convierte con LibreOffice usando un perfil temporal aislado por conversión (H27)."""
+    from .privacy import TempManager
+
     soffice = find_soffice()
     if not soffice:
         raise RuntimeError("No se encontró LibreOffice. Instalalo para convertir documentos de Office.")
-    profile = os.path.join(DATA_DIR, "lo_profile")
-    os.makedirs(profile, exist_ok=True)
-    profile_url = pathlib.Path(profile).as_uri()      # codifica espacios y acentos de la ruta
-    cmd = [soffice, "--headless", "--norestore", "--nolockcheck", f"-env:UserInstallation={profile_url}",
-           "--convert-to", "pdf", "--outdir", out_dir, path]
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    profile = TempManager.create_temp_dir(prefix="editorpdf_lo_profile_")
     try:
-        subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=flags, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"LibreOffice tardó demasiado en convertir «{os.path.basename(path)}».") from exc
-    out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
-    if not os.path.isfile(out):
-        raise RuntimeError(f"LibreOffice no pudo convertir «{os.path.basename(path)}».")
-    return out
+        profile_url = pathlib.Path(profile).as_uri()      # codifica espacios y acentos de la ruta
+        cmd = [soffice, "--headless", "--norestore", "--nolockcheck", f"-env:UserInstallation={profile_url}",
+               "--convert-to", "pdf", "--outdir", out_dir, path]
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=flags, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"LibreOffice tardó demasiado en convertir «{os.path.basename(path)}».") from exc
+        out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
+        if not os.path.isfile(out):
+            raise RuntimeError(f"LibreOffice no pudo convertir «{os.path.basename(path)}».")
+        return out
+    finally:
+        TempManager.cleanup_path(profile)
 
 
 def convert_office_files(paths: list[str], out_dir: str) -> dict[str, str]:
     """Convierte (en bloque) los archivos de Office de la lista. Apto para un hilo en segundo plano."""
+    from .privacy import TempManager
+
     result: dict[str, str] = {}
     for p in paths:
         if classify(p) == "office":
             sub = tempfile.mkdtemp(dir=out_dir)
+            TempManager.register(sub)
             result[p] = office_to_pdf_file(p, sub)
     return result
 

@@ -75,11 +75,24 @@ class TextSelectionPopup(QFrame):
 
     def show_at(self, global_pos):
         self.adjustSize()
-        x = global_pos.x() - self.width() // 2
-        y = global_pos.y() - self.height() - 8
-        if y < 10:
-            y = global_pos.y() + 20
-        self.move(max(10, x), y)
+        parent = self.parentWidget()
+        if parent is not None:
+            local_pos = parent.mapFromGlobal(global_pos)
+            pw = max(self.width() + 12, parent.width())
+            ph = max(self.height() + 12, parent.height())
+            x = local_pos.x() - self.width() // 2
+            y = local_pos.y() - self.height() - 8
+            if y < 6:
+                y = local_pos.y() + 20
+            x = max(6, min(x, pw - self.width() - 6))
+            y = max(6, min(y, ph - self.height() - 6))
+            self.move(x, y)
+        else:
+            x = global_pos.x() - self.width() // 2
+            y = global_pos.y() - self.height() - 8
+            if y < 10:
+                y = global_pos.y() + 20
+            self.move(max(10, x), y)
         self.show()
         self.raise_()
 

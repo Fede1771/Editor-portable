@@ -18,3 +18,9 @@ dist/
 *.temp
 Thumbs.db
 Desktop.ini
+.pytest_cache/
+data/lo_profile/
+
+# Informes locales de auditoría (no subir al repositorio)
+informes_auditoria/
+Informes_para_Antigravity.md

@@ -15,6 +15,10 @@ warnings.filterwarnings("ignore", message=r".*The `fitz` API is deprecated.*", c
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# H39: aislar preferencias (no tocar el Registro / recientes reales del usuario)
+import tempfile as _tempfile
+os.environ.setdefault("EDITORPDF_SETTINGS_DIR", _tempfile.mkdtemp(prefix="editorpdf_test_settings_"))
+
 import pymupdf as fitz
 from app import operations, creation, content_ops, ocr, conversion, optimizer, annotations, forms
 
@@ -368,11 +372,12 @@ def main():
     assert sanitize_attachment_name("C:\\Windows\\system32\\calc.exe") == "calc.exe"
     assert sanitize_attachment_name("archivo.pdf   ") == "archivo.pdf"
     assert sanitize_attachment_name("test:stream.txt") == "test_stream.txt"
+    assert sanitize_attachment_name("CON.txt") == "_CON.txt"
 
     from app.conversion import _safe_excel_cell
-    assert _safe_excel_cell("=1+1") == "'=1+1"
-    assert _safe_excel_cell("@SUM(A1:A10)") == "'@SUM(A1:A10)"
-    assert _safe_excel_cell("-cmd|' /C calc'!A0") == "'-cmd|' /C calc'!A0"
+    assert _safe_excel_cell("=1+1") == "=1+1"
+    assert _safe_excel_cell("@SUM(A1:A10)") == "@SUM(A1:A10)"
+    assert _safe_excel_cell("-cmd|' /C calc'!A0") == "-cmd|' /C calc'!A0"
     assert _safe_excel_cell("Texto normal") == "Texto normal"
 
     from app.forms import document_has_signatures
@@ -396,7 +401,12 @@ def main():
     shutil.rmtree(out_dir, ignore_errors=True)
 
     print("\nTODAS LAS PRUEBAS COMPLETADAS CON EXITO.")
-    os._exit(0)
+
+
+def test_end_to_end_suite():
+    """H39: Ejecuta la suite integral bajo pytest sin os._exit ni tocar preferencias reales."""
+    main()
+
 
 if __name__ == "__main__":
     main()

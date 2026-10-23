@@ -20,21 +20,133 @@ DANGEROUS_EXTENSIONS = {
     ".ps1", ".psm1", ".scr", ".pif", ".com", ".jar", ".reg", ".msi", ".dll",
     ".hta", ".cpl", ".lnk", ".iso", ".chm", ".url", ".docm", ".xlsm", ".pptm",
     ".dotm", ".xltm", ".potm", ".wsc", ".inf", ".scf",
+    ".msp", ".mst", ".appx", ".msix", ".appref-ms", ".settingcontent-ms", ".library-ms",
+    ".img", ".vhd", ".vhdx", ".application", ".gadget", ".msc", ".ps1xml", ".psc1",
+    ".psd1", ".sys", ".drv", ".ocx", ".xll", ".xlam", ".ppam", ".sldm", ".xlsb",
+    ".one", ".website", ".vb", ".shb", ".shs", ".ws", ".sct", ".py", ".pyw",
 }
+
+# H40: política explícita de tipos que se consideran pasivos y pueden despacharse a la
+# aplicación asociada sin confirmación. Todo lo demás requiere guardar para revisión
+# (tipos activos) o confirmación informada (tipos desconocidos).
+PASSIVE_EXTENSIONS = {
+    ".txt", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp",
+    ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".xml", ".json",
+    ".mp3", ".wav", ".mp4", ".zip", ".eml", ".msg",
+}
+
+_RESERVED_DEVICE_NAMES = (
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$"}
+    | {f"COM{i}" for i in range(10)} | {f"LPT{i}" for i in range(10)}
+    | {"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"}
+)
+_MAX_NAME_LEN = 180
+
+KIND_PDF = "pdf"
+KIND_PASSIVE = "passive"
+KIND_ACTIVE = "active"
+KIND_UNKNOWN = "unknown"
+
+
+def safe_local_name(name: str) -> str:
+    """Genera un nombre de archivo local seguro a partir del nombre (no confiable) declarado en el PDF.
+
+    - Elimina cualquier componente de ruta (relativa, absoluta, unidad, UNC).
+    - Neutraliza flujos alternativos NTFS (``:``), caracteres reservados y de control.
+    - Quita puntos y espacios finales (Windows los descarta al crear el archivo).
+    - Antepone ``_`` a nombres de dispositivo reservados (CON, NUL, COM1, …).
+    """
+    raw = (name or "").replace("\\", "/")
+    base = raw.rsplit("/", 1)[-1]
+    # Unidades ("C:archivo") y ADS ("archivo:stream") -> se cortan en el primer ':' significativo
+    base = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', "_", base)
+    base = base.strip(" .\t")
+    if base in ("", "_") or set(base) <= {".", "_", " "}:
+        base = "adjunto.dat"
+    stem, dot, ext = base.partition(".")
+    if stem.upper().rstrip(" ") in _RESERVED_DEVICE_NAMES:
+        base = "_" + base
+    if len(base) > _MAX_NAME_LEN:
+        root, ext2 = os.path.splitext(base)
+        base = root[: _MAX_NAME_LEN - len(ext2)] + ext2
+    return base
 
 
 def sanitize_attachment_name(name: str) -> str:
-    """Sanitiza el nombre del archivo adjunto eliminando rutas relativas maliciosas (path traversal),
+    """Compatibilidad: alias de :func:`safe_local_name`."""
+    return safe_local_name(name)
 
-    caracteres reservados en Windows y espacios/puntos al final.
+
+def canonical_extension(name: str) -> str:
+    """Extensión efectiva que usará Windows para el nombre dado (tras normalizarlo)."""
+    return os.path.splitext(safe_local_name(name))[1].lower()
+
+
+def classify_attachment(name: str) -> str:
+    """Clasifica un adjunto según la extensión canónica: pdf / passive / active / unknown."""
+    ext = canonical_extension(name)
+    if ext == ".pdf":
+        return KIND_PDF
+    if ext in DANGEROUS_EXTENSIONS:
+        return KIND_ACTIVE
+    if ext in PASSIVE_EXTENSIONS:
+        return KIND_PASSIVE
+    return KIND_UNKNOWN
+
+
+def contained_path(root: str, name: str) -> str:
+    """Devuelve la ruta absoluta de ``name`` dentro de ``root`` o lanza ValueError si escaparía."""
+    root_abs = os.path.realpath(os.path.abspath(root))
+    target = os.path.realpath(os.path.abspath(os.path.join(root_abs, safe_local_name(name))))
+    if os.path.dirname(target) != root_abs:
+        raise ValueError("Ruta de destino fuera de la carpeta permitida.")
+    return target
+
+
+def unique_path(path: str) -> str:
+    """Evita colisiones: agrega un sufijo numérico si el archivo ya existe."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    cnt = 1
+    while os.path.exists(f"{base}_{cnt}{ext}"):
+        cnt += 1
+    return f"{base}_{cnt}{ext}"
+
+
+# ------------------------------------------------------------------ H41 procedencia (MOTW)
+UNTRUSTED_ZONE = 3  # Internet
+
+
+def read_zone_id(path: str | None) -> int | None:
+    """Lee el ZoneId del flujo Zone.Identifier (Mark of the Web) de un archivo, si existe."""
+    if not path:
+        return None
+    try:
+        with open(path + ":Zone.Identifier", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.strip().lower().startswith("zoneid="):
+                    return int(line.split("=", 1)[1].strip())
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def write_mark_of_the_web(path: str, source_path: str | None = None) -> bool:
+    """Marca un archivo extraído como de procedencia no confiable.
+
+    Política: el contenido embebido en un PDF se trata siempre como externo. Se propaga el ZoneId
+    del PDF contenedor si es igual o más restrictivo que Internet (3); en otro caso se asigna 3.
+    Devuelve False si el sistema de archivos no admite la marca (p. ej. FAT32).
     """
-    if not name:
-        return "adjunto.dat"
-    base = os.path.basename(name.replace("\\", "/"))
-    cleaned = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "_", base).strip(". ")
-    if not cleaned:
-        cleaned = "adjunto.dat"
-    return cleaned
+    zone = read_zone_id(source_path)
+    zone = zone if zone is not None and zone >= UNTRUSTED_ZONE else UNTRUSTED_ZONE
+    try:
+        with open(path + ":Zone.Identifier", "w", encoding="utf-8") as fh:
+            fh.write(f"[ZoneTransfer]\r\nZoneId={zone}\r\n")
+        return True
+    except OSError:
+        return False
 
 
 def format_size(size_bytes: int) -> str:
@@ -86,34 +198,55 @@ def get_all_attachments(doc: fitz.Document) -> list[dict]:
         })
 
     # 2. Archivos adjuntos ubicados en anotaciones de página
-    for pno, page in enumerate(doc):
-        for annot in page.annots():
-            if annot.type[1] == "FileAttachment":
-                info = getattr(annot, "file_info", {}) or {}
-                fn = info.get("filename") or info.get("ufilename") or f"adjunto_pag_{pno+1}"
-                size = info.get("size") or 0
-                items.append({
-                    "source": "annot",
-                    "page": pno,
-                    "annot": annot,
-                    "name": fn,
-                    "filename": fn,
-                    "size": size,
-                    "date": "",
-                    "desc": f"En página {pno + 1}",
-                })
+    # H15: no se conserva el wrapper Annot (queda huérfano si la página se recolecta o el
+    # documento se reemplaza); se guarda página + xref y se recarga desde una página viva.
+    for pno in range(doc.page_count):
+        page = doc[pno]
+        for annot in page.annots(types=[fitz.PDF_ANNOT_FILE_ATTACHMENT]):
+            info = getattr(annot, "file_info", {}) or {}
+            fn = info.get("filename") or info.get("ufilename") or f"adjunto_pag_{pno+1}"
+            size = info.get("size") or info.get("length") or 0
+            items.append({
+                "source": "annot",
+                "page": pno,
+                "xref": annot.xref,
+                "name": fn,
+                "filename": fn,
+                "size": size,
+                "date": "",
+                "desc": f"En página {pno + 1}",
+            })
 
     return items
+
+
+def _load_annot(doc: fitz.Document, item: dict):
+    page = doc[item.get("page", 0)]
+    annot = page.load_annot(item["xref"])
+    return page, annot
 
 
 def get_attachment_bytes(doc: fitz.Document, item: dict) -> bytes:
     """Extrae los bytes crudos del archivo adjunto seleccionado."""
     if item.get("source") == "annot":
-        annot = item.get("annot")
-        if annot is not None and hasattr(annot, "get_file"):
-            return annot.get_file() or b""
+        page, annot = _load_annot(doc, item)
+        if annot is None:
+            raise ValueError("La anotación del adjunto ya no existe en el documento.")
+        data = annot.get_file() or b""
+        del annot, page
+        return data
     idx = item.get("index", 0)
     return doc.embfile_get(idx)
+
+
+def delete_attachment(doc: fitz.Document, item: dict) -> None:
+    """Elimina el adjunto indicado (de catálogo o de anotación) del documento dado."""
+    if item.get("source") == "annot":
+        page, annot = _load_annot(doc, item)
+        if annot is not None:
+            page.delete_annot(annot)
+    else:
+        doc.embfile_del(item.get("index", 0))
 
 
 class AttachmentWidget(QWidget):
@@ -214,6 +347,31 @@ class AttachmentWidget(QWidget):
         self.btn_del.setEnabled(has_items)
         return len(attachments)
 
+    def _source_path(self) -> str | None:
+        p = self.parent()
+        while p is not None:
+            if hasattr(p, "path") and getattr(p, "path"):
+                return getattr(p, "path")
+            p = p.parent() if hasattr(p, "parent") else None
+        return getattr(self.doc, "name", None) or None
+
+    def _run_doc_edit(self, fn: Callable[[fitz.Document], None]) -> None:
+        """Ejecuta una mutación dentro de la transacción Undo/Redo de la pestaña si existe (H24)."""
+        p = self.parent()
+        while p is not None:
+            if hasattr(p, "run_edit"):
+                p.run_edit(fn)
+                return
+            p = p.parent() if hasattr(p, "parent") else None
+        fn(self.doc)
+        self.reload()
+        self.attachmentChanged.emit()
+
+    def _write_extracted_file(self, target_path: str, data: bytes) -> None:
+        with open(target_path, "wb") as f:
+            f.write(data)
+        write_mark_of_the_web(target_path, source_path=self._source_path())
+
     def _selected_item_data(self) -> dict | None:
         item = self.tree.currentItem()
         if item is not None:
@@ -238,16 +396,20 @@ class AttachmentWidget(QWidget):
                 QMessageBox.warning(self, "Archivo vacío", f"El archivo adjunto '{fn}' no contiene datos.")
                 return
 
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in DANGEROUS_EXTENSIONS:
+            # H02/H40: normalizar SIEMPRE antes de clasificar la extensión
+            safe_name = safe_local_name(fn)
+            ext = canonical_extension(safe_name)
+            kind = classify_attachment(safe_name)
+
+            if kind == KIND_ACTIVE:
                 r = QMessageBox.warning(
                     self,
                     "Advertencia de seguridad",
-                    f"El archivo adjunto «{fn}» tiene una extensión ejecutable o de script ({ext}).\n\n"
+                    f"El archivo adjunto «{safe_name}» tiene una extensión activa o ejecutable ({ext}).\n\n"
                     "Ejecutar este tipo de archivos directamente puede comprometer la seguridad de tu equipo "
                     "si el PDF proviene de un origen desconocido.\n\n"
                     "Por seguridad, el editor no lo ejecutará automáticamente.\n"
-                    "¿Deseas guardarlo en una carpeta para analizarlo previamente con tu antivirus?",
+                    "¿Deseas guardarlo en una carpeta para analizarlo previamente?",
                     QMessageBox.Save | QMessageBox.Cancel,
                     QMessageBox.Save,
                 )
@@ -255,20 +417,33 @@ class AttachmentWidget(QWidget):
                     self.save_selected()
                 return
 
-            if ext == ".pdf":
-                # Si es PDF, emitir señal para abrir en nueva pestaña del visor
-                self.openPdfRequested.emit(data, fn)
+            if kind == KIND_UNKNOWN:
+                r = QMessageBox.warning(
+                    self,
+                    "Tipo de adjunto no verificado",
+                    f"El archivo adjunto «{safe_name}» tiene un tipo ({ext or 'sin extensión'}) que no figura "
+                    "en la lista de formatos pasivos permitidos para apertura directa.\n\n"
+                    "Por seguridad, no se abrirá automáticamente con una aplicación externa.\n"
+                    "¿Deseas guardarlo en disco para revisarlo manualmente?",
+                    QMessageBox.Save | QMessageBox.Cancel,
+                    QMessageBox.Save,
+                )
+                if r == QMessageBox.Save:
+                    self.save_selected()
                 return
 
-            # Para otros formatos (Excel, Word, imágenes, etc.), guardar en archivo temporal y abrir en Windows
+            if kind == KIND_PDF:
+                self.openPdfRequested.emit(data, safe_name)
+                return
+
+            # Revalidación inmediata antes del despacho al sistema (H40)
+            if classify_attachment(safe_name) != KIND_PASSIVE:
+                raise ValueError("El tipo de archivo no está habilitado para apertura directa.")
+
             from .privacy import TempManager
-            safe_name = sanitize_attachment_name(fn)
             temp_dir = TempManager.create_temp_dir(prefix="pdf_attachment_")
-            temp_path = os.path.abspath(os.path.join(temp_dir, safe_name))
-            if not temp_path.startswith(os.path.abspath(temp_dir)):
-                raise ValueError("Ruta de archivo no válida.")
-            with open(temp_path, "wb") as f:
-                f.write(data)
+            temp_path = contained_path(temp_dir, safe_name)
+            self._write_extracted_file(temp_path, data)
             os.startfile(temp_path)
         except Exception as exc:
             QMessageBox.critical(self, "Error al abrir adjunto", f"No se pudo abrir '{fn}':\n{exc}")
@@ -277,14 +452,13 @@ class AttachmentWidget(QWidget):
         att = self._selected_item_data()
         if not att:
             return
-        fn = sanitize_attachment_name(att["filename"])
+        fn = safe_local_name(att["filename"])
         target, _ = QFileDialog.getSaveFileName(self, "Guardar archivo adjunto", fn)
         if not target:
             return
         try:
             data = get_attachment_bytes(self.doc, att)
-            with open(target, "wb") as f:
-                f.write(data)
+            self._write_extracted_file(target, data)
             QMessageBox.information(self, "Archivo guardado", f"Se guardó '{fn}' correctamente.")
         except Exception as exc:
             QMessageBox.critical(self, "Error al guardar", f"No se pudo guardar el archivo:\n{exc}")
@@ -295,25 +469,13 @@ class AttachmentWidget(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para extraer todos los adjuntos")
         if not folder:
             return
-        abs_folder = os.path.abspath(folder)
         saved_count = 0
         attachments = get_all_attachments(self.doc)
         for att in attachments:
-            fn = sanitize_attachment_name(att["filename"])
-            target = os.path.abspath(os.path.join(abs_folder, fn))
-            # Garantizar que el destino no escape de la carpeta seleccionada (anti path-traversal)
-            if not target.startswith(abs_folder):
-                continue
-            # Evitar colisión de nombres
-            base, ext = os.path.splitext(target)
-            cnt = 1
-            while os.path.exists(target):
-                target = f"{base}_{cnt}{ext}"
-                cnt += 1
             try:
+                target = unique_path(contained_path(folder, att["filename"]))
                 data = get_attachment_bytes(self.doc, att)
-                with open(target, "wb") as f:
-                    f.write(data)
+                self._write_extracted_file(target, data)
                 saved_count += 1
             except Exception:
                 pass
@@ -328,12 +490,10 @@ class AttachmentWidget(QWidget):
         if not file_path:
             return
         try:
-            fn = os.path.basename(file_path)
+            fn = safe_local_name(os.path.basename(file_path))
             with open(file_path, "rb") as f:
                 data = f.read()
-            self.doc.embfile_add(fn, data, filename=fn, ufilename=fn)
-            self.reload()
-            self.attachmentChanged.emit()
+            self._run_doc_edit(lambda d: d.embfile_add(fn, data, filename=fn, ufilename=fn))
             QMessageBox.information(self, "Archivo adjuntado", f"Se adjuntó '{fn}' al PDF.\nRecuerda guardar los cambios (Ctrl+S).")
         except Exception as exc:
             QMessageBox.critical(self, "Error al adjuntar", f"No se pudo adjuntar el archivo:\n{exc}")
@@ -352,15 +512,8 @@ class AttachmentWidget(QWidget):
         if r != QMessageBox.Yes:
             return
         try:
-            if att.get("source") == "annot":
-                annot = att.get("annot")
-                pno = att.get("page", 0)
-                if annot is not None:
-                    self.doc[pno].delete_annot(annot)
-            else:
-                self.doc.embfile_del(att.get("index", 0))
-            self.reload()
-            self.attachmentChanged.emit()
+            spec = dict(att)
+            self._run_doc_edit(lambda d: delete_attachment(d, spec))
             QMessageBox.information(self, "Archivo eliminado", f"Se eliminó '{fn}'.\nRecuerda guardar los cambios (Ctrl+S).")
         except Exception as exc:
             QMessageBox.critical(self, "Error al eliminar", f"No se pudo eliminar el adjunto:\n{exc}")
@@ -370,8 +523,8 @@ class AttachmentWidget(QWidget):
         menu = QMenu(self)
         if item is not None:
             att = item.data(0, Qt.UserRole)
-            fn = att["filename"]
-            ext = os.path.splitext(fn)[1].lower()
+            fn = safe_local_name(att["filename"])
+            ext = canonical_extension(fn)
             act_open = menu.addAction(f"Abrir '{fn}'")
             act_open.triggered.connect(lambda: self._open_attachment(att))
 
@@ -381,13 +534,9 @@ class AttachmentWidget(QWidget):
                     try:
                         d = get_attachment_bytes(self.doc, att)
                         from .privacy import TempManager
-                        safe_name = sanitize_attachment_name(fn)
                         td = TempManager.create_temp_dir(prefix="pdf_attachment_")
-                        tp = os.path.abspath(os.path.join(td, safe_name))
-                        if not tp.startswith(os.path.abspath(td)):
-                            raise ValueError("Ruta de archivo no válida.")
-                        with open(tp, "wb") as f:
-                            f.write(d)
+                        tp = contained_path(td, fn)
+                        self._write_extracted_file(tp, d)
                         os.startfile(tp)
                     except Exception as e:
                         QMessageBox.critical(self, "Error", str(e))

@@ -528,12 +528,10 @@ class MainWindow(QMainWindow):
         tab.view.underlineRequested.connect(lambda pno, rect, t=tab: self._on_underline_requested(t, pno, rect))
         tab.view.strikeoutRequested.connect(lambda pno, rect, t=tab: self._on_strikeout_requested(t, pno, rect))
         tab.view.linkActivated.connect(self._on_link_activated)
-        tab.view.textSelected.connect(lambda txt: self.status_msg.setText(f"Texto copiado ({len(txt)} caracteres) al portapapeles."))
+        tab.view.textSelected.connect(lambda txt: self.status_msg.setText(f"Texto seleccionado ({len(txt)} caracteres). Presione Ctrl+C para copiar."))
         tab.view.set_tool(self._current_tool)
         tab.edited.connect(lambda t=tab: self._on_edited(t))
         tab.thumbs.addAction(self.a_delete)
-        tab.thumbs.setContextMenuPolicy(Qt.CustomContextMenu)
-        tab.thumbs.customContextMenuRequested.connect(lambda pos, t=tab: t._on_thumb_context_menu(pos))
         tab.openPdfAttachmentRequested.connect(self._open_attached_pdf)
         idx = self.tabs.addTab(tab, tab.title)
         self.tabs.setTabToolTip(idx, path)
@@ -666,27 +664,25 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
-        from .security import sanitize_metadata, sanitize_document
+        if not self._confirm_signed_doc_overwrite(tab):
+            return
+        from .security import create_sanitized_copy
         base = os.path.splitext(os.path.basename(tab.path) if tab.path else "documento")[0]
         suggested = f"{base}_anonimo.pdf"
         out_path, _ = QFileDialog.getSaveFileName(self, "Guardar copia anónima y sanitizada", suggested, PDF_FILTER)
         if not out_path:
             return
 
-        copy_doc = fitz.open()
-        copy_doc.insert_pdf(tab.doc)
-        sanitize_metadata(copy_doc)
-        sanitize_document(copy_doc)
         try:
-            copy_doc.save(out_path, deflate=True, garbage=4)
-            copy_doc.close()
+            create_sanitized_copy(tab.doc, out_path)
             QMessageBox.information(
                 self,
                 "Copia anónima guardada",
                 f"Se ha guardado exitosamente la copia sanitizada en:\n{out_path}\n\n"
-                "• Metadatos de autor, software e historial: Eliminados.\n"
+                "• Metadatos de autor, software, fechas y comentarios: Anonimizados.\n"
                 "• Identificadores XML / XMP de rastreo: Eliminados.\n"
-                "• Scripts y acciones automáticas: Removidos.",
+                "• Scripts y acciones automáticas: Removidos.\n"
+                "• Marcadores y archivos adjuntos: Conservados.",
             )
             self.status_msg.setText(f"Copia anónima guardada: {out_path}")
         except Exception as exc:
@@ -794,10 +790,7 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- herramientas de interacción
     def _set_active_tool(self, tool: str):
-        self._current_tool = tool
         tab = self.current_tab()
-        if tab:
-            tab.view.set_tool(tool)
         action_map = {
             TOOL_PAN: self.a_tool_pan,
             TOOL_SELECT: self.a_tool_select,
@@ -811,6 +804,25 @@ class MainWindow(QMainWindow):
             TOOL_STRIKEOUT: self.a_tool_strikeout,
             TOOL_NOTE: self.a_tool_note,
         }
+        # H35: Si hay una selección activa en el visor y se invoca Resaltar/Subrayar/Tachar (p. ej. Shift+H/U/K),
+        # aplicar la anotación directamente sobre la selección en lugar de vaciarla cambiando de herramienta.
+        if tab is not None and tool in (TOOL_HIGHLIGHT, TOOL_UNDERLINE, TOOL_STRIKEOUT):
+            v = tab.view
+            if v._selected_text or v._selection_line_rects:
+                if tool == TOOL_HIGHLIGHT:
+                    v._highlight_selection()
+                elif tool == TOOL_UNDERLINE:
+                    v._underline_selection()
+                elif tool == TOOL_STRIKEOUT:
+                    v._strikeout_selection()
+                prev_act = action_map.get(self._current_tool)
+                if prev_act and not prev_act.isChecked():
+                    prev_act.setChecked(True)
+                return
+
+        self._current_tool = tool
+        if tab:
+            tab.view.set_tool(tool)
         act = action_map.get(tool)
         if act and not act.isChecked():
             act.setChecked(True)
@@ -975,11 +987,18 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         vals = dlg.values()
+        updated = {"n": 0}
+        def _do_update(d):
+            updated["n"] = forms_mod.update_form_fields(d, vals)
         self._edit(
             tab,
-            lambda d: forms_mod.update_form_fields(d, vals),
-            f"Se actualizaron {len(vals)} campos de formulario",
+            _do_update,
+            "Campos de formulario procesados",
         )
+        if updated["n"] > 0:
+            self.status_msg.setText(f"Se actualizaron {updated['n']} campos de formulario")
+        else:
+            self.status_msg.setText("No hubo campos editables para modificar")
 
     def flatten_form_fields(self):
         tab = self.current_tab()
@@ -1178,6 +1197,8 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
+        if not self._confirm_signed_doc_overwrite(tab):
+            return
 
         current_size = 0
         if tab.path and os.path.exists(tab.path):
@@ -1296,7 +1317,7 @@ class MainWindow(QMainWindow):
             return
         paths = dlg.files()
         office = [p for p in paths if creation.classify(p) == "office"]
-        tmp = tempfile.mkdtemp(prefix="editorpdf_")
+        tmp = TempManager.create_temp_dir(prefix="editorpdf_create_")
         try:
             converted: dict[str, str] = {}
             if office:
@@ -1312,7 +1333,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No se pudo crear el PDF", str(exc))
             return
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            TempManager.cleanup_path(tmp)
         name = os.path.splitext(os.path.basename(paths[0]))[0] if len(paths) == 1 else "combinado"
         self._add_tab("", doc, save_as_only=True, modified=True, suggested=f"{name}.pdf")
         self.status_msg.setText(f"PDF creado con {doc.page_count} páginas. Guardalo con Ctrl+S.")

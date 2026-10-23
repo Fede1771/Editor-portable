@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import math
 
 import pymupdf as fitz
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -15,6 +16,8 @@ GAP = 12
 MIN_ZOOM = 0.1
 MAX_ZOOM = 8.0
 CACHE_SIZE = 40
+MAX_CACHE_BYTES = 128 * 1024 * 1024  # 128 MB de presupuesto máximo de pixmaps (H36)
+MAX_RENDER_PIXELS = 24_000_000       # límite de píxeles por página renderizada (~6000x4000) (H36)
 
 MODE_CONTINUOUS = "continuous"
 MODE_SINGLE = "single"
@@ -79,6 +82,7 @@ class PdfView(QAbstractScrollArea):
         self._content_w = 0.0
 
         self._cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+        self._cache_bytes: int = 0
 
         self._hits: list[tuple[int, fitz.Rect]] = []
         self._hit_index = -1
@@ -166,7 +170,8 @@ class PdfView(QAbstractScrollArea):
 
     def _copy_selection(self):
         if self._selected_text:
-            QApplication.clipboard().setText(self._selected_text)
+            from .privacy import copy_to_clipboard
+            copy_to_clipboard(self._selected_text)
             self.textSelected.emit(self._selected_text)
         self.popup.hide()
 
@@ -268,18 +273,25 @@ class PdfView(QAbstractScrollArea):
         self.goto_page(self._current - step)
 
     def reload(self, doc: fitz.Document | None = None):
-        """Vuelve a leer el documento (tras modificarlo)."""
+        """Vuelve a leer el documento (tras modificarlo) invalidando búsquedas y selecciones obsoletas (H23)."""
         if doc is not None:
             self.doc = doc
         self.page_count = self.doc.page_count
         self._sizes = [(p.rect.width, p.rect.height) for p in self.doc]
         self._cache.clear()
+        self._cache_bytes = 0
         self._annots_cache.clear()
         self._blocks_cache.clear()
         self._words_cache.clear()
         self._links_cache.clear()
+        self._hits.clear()
+        self._hit_index = -1
+        self._selected_text = ""
+        self._last_selection_target = None
+        self._hover_block = None
         self._selection_line_rects.clear()
         self._selection_page = -1
+        self.popup.hide()
         self._current = min(self._current, max(0, self.page_count - 1))
         self._relayout()
 
@@ -461,6 +473,8 @@ class PdfView(QAbstractScrollArea):
         if self.page_count <= 1:
             return
         p = self._current
+        if self._zoom >= 2.5:
+            return
         candidates = []
         if p + 1 < self.page_count:
             candidates.append(p + 1)
@@ -473,6 +487,10 @@ class PdfView(QAbstractScrollArea):
                 pass
 
     # ------------------------------------------------------------ renderizado
+    @staticmethod
+    def _pixmap_byte_cost(pix: QPixmap) -> int:
+        return max(0, pix.width() * pix.height() * 4)
+
     def _pixmap(self, i: int) -> QPixmap:
         dpr = self.devicePixelRatioF()
         key = (i, round(self._zoom, 4), self._rotation, dpr)
@@ -481,29 +499,61 @@ class PdfView(QAbstractScrollArea):
             self._cache.move_to_end(key)
             return pix
         scale = self._zoom * dpr
+        eff_w, eff_h = self._eff_size(i)
+        est_pixels = max(1.0, eff_w * scale) * max(1.0, eff_h * scale)
+        if est_pixels > MAX_RENDER_PIXELS:
+            scale *= math.sqrt(MAX_RENDER_PIXELS / est_pixels)
         matrix = fitz.Matrix(scale, scale).prerotate(self._rotation)
         pm = self.doc[i].get_pixmap(matrix=matrix, alpha=False)
         img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888).copy()
         pix = QPixmap.fromImage(img)
         pix.setDevicePixelRatio(dpr)
+        cost = self._pixmap_byte_cost(pix)
         self._cache[key] = pix
-        while len(self._cache) > CACHE_SIZE:
-            self._cache.popitem(last=False)
+        self._cache_bytes += cost
+        while len(self._cache) > 1 and (len(self._cache) > CACHE_SIZE or self._cache_bytes > MAX_CACHE_BYTES):
+            _, evicted = self._cache.popitem(last=False)
+            self._cache_bytes = max(0, self._cache_bytes - self._pixmap_byte_cost(evicted))
         return pix
 
+    def _page_transform(self, i: int) -> tuple[fitz.Matrix, fitz.Rect]:
+        """Retorna la matriz compuesta (rotación propia del PDF * vista) y el page_box en la vista (H16)."""
+        page = self.doc[i]
+        view_m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
+        total_m = page.rotation_matrix * view_m
+        page_box = page.rect * view_m
+        return total_m, page_box
+
     def _map_rect(self, i: int, rect: fitz.Rect) -> QRectF:
-        """Convierte un rectángulo en coords de página al espacio de la página mostrada."""
-        m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
-        page_box = self.doc[i].rect * m
-        r = rect * m
+        """Convierte un rectángulo en coords de página al espacio de la página mostrada (H16)."""
+        total_m, page_box = self._page_transform(i)
+        r = (rect * total_m).normalize()
         return QRectF(r.x0 - page_box.x0, r.y0 - page_box.y0, r.width, r.height)
 
     def _map_point(self, i: int, pt: fitz.Point) -> QPointF:
-        """Convierte un punto en coords de página al espacio de la página mostrada."""
-        m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
-        page_box = self.doc[i].rect * m
-        p = pt * m
+        """Convierte un punto en coords de página al espacio de la página mostrada (H16)."""
+        total_m, page_box = self._page_transform(i)
+        p = pt * total_m
         return QPointF(p.x - page_box.x0, p.y - page_box.y0)
+
+    def _viewport_point_on_page(self, pno: int, pt: QPointF, clamp: bool = True) -> fitz.Point | None:
+        """Proyecta un punto del viewport en el espacio local de la página `pno`, acotándolo a sus bordes si `clamp=True` (H16, H17)."""
+        prect = self._page_rects.get(pno)
+        if prect is None:
+            return None
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        cpt = pt + QPointF(dx, dy)
+        cx = cpt.x()
+        cy = cpt.y()
+        if clamp:
+            cx = max(prect.left(), min(prect.right(), cx))
+            cy = max(prect.top(), min(prect.bottom(), cy))
+        rel_x = cx - prect.x()
+        rel_y = cy - prect.y()
+        total_m, page_box = self._page_transform(pno)
+        inv_m = ~total_m
+        return fitz.Point(rel_x + page_box.x0, rel_y + page_box.y0) * inv_m
 
     def viewport_to_page_point(self, pt: QPointF) -> tuple[int | None, fitz.Point | None]:
         """Convierte un punto del viewport a coords absolutas de la página PDF."""
@@ -512,24 +562,24 @@ class PdfView(QAbstractScrollArea):
         cpt = pt + QPointF(dx, dy)
         for pno, prect in self._page_rects.items():
             if prect.contains(cpt):
-                rel_x = cpt.x() - prect.x()
-                rel_y = cpt.y() - prect.y()
-                m = fitz.Matrix(self._zoom, self._zoom).prerotate(self._rotation)
-                page_box = self.doc[pno].rect * m
-                inv_m = ~m
-                pdf_pt = fitz.Point(rel_x + page_box.x0, rel_y + page_box.y0) * inv_m
+                pdf_pt = self._viewport_point_on_page(pno, pt, clamp=False)
                 return pno, pdf_pt
         return None, None
 
     def viewport_to_page_rect(self, p1: QPointF, p2: QPointF) -> tuple[int | None, fitz.Rect | None]:
-        """Convierte una región de arrastre del viewport a un fitz.Rect en la página PDF."""
+        """Convierte una región de arrastre del viewport a un fitz.Rect acotado a la página de origen (H17)."""
         pno1, pt1 = self.viewport_to_page_point(p1)
-        pno2, pt2 = self.viewport_to_page_point(p2)
-        pno = pno1 if pno1 is not None else pno2
-        if pno is None:
+        if pno1 is not None:
+            pno = pno1
+            pt2 = self._viewport_point_on_page(pno, p2, clamp=True)
+        else:
+            pno2, pt2 = self.viewport_to_page_point(p2)
+            if pno2 is None:
+                return None, None
+            pno = pno2
+            pt1 = self._viewport_point_on_page(pno, p1, clamp=True)
+        if pt1 is None or pt2 is None:
             return None, None
-        pt1 = pt1 or pt2
-        pt2 = pt2 or pt1
         rect = fitz.Rect(min(pt1.x, pt2.x), min(pt1.y, pt2.y), max(pt1.x, pt2.x), max(pt1.y, pt2.y))
         return pno, rect
 
@@ -576,18 +626,26 @@ class PdfView(QAbstractScrollArea):
         return best_idx
 
     def _update_text_selection(self, start_pos: QPointF, current_pos: QPointF):
-        """Calcula la selección de texto fluida continua en orden de lectura natural."""
+        """Calcula la selección de texto fluida continua en orden de lectura natural (H17)."""
         pno1, pt1 = self.viewport_to_page_point(start_pos)
-        pno2, pt2 = self.viewport_to_page_point(current_pos)
-        if pno1 is None and pno2 is None:
+        if pno1 is not None:
+            pno = pno1
+            pt2 = self._viewport_point_on_page(pno, current_pos, clamp=True)
+        else:
+            pno2, pt2 = self.viewport_to_page_point(current_pos)
+            if pno2 is None:
+                self._selection_line_rects = []
+                self._selection_page = -1
+                self._selected_text = ""
+                return
+            pno = pno2
+            pt1 = self._viewport_point_on_page(pno, start_pos, clamp=True)
+
+        if pt1 is None or pt2 is None:
             self._selection_line_rects = []
             self._selection_page = -1
             self._selected_text = ""
             return
-
-        pno = pno1 if pno1 is not None else pno2
-        pt1 = pt1 or pt2
-        pt2 = pt2 or pt1
 
         if pno not in self._words_cache:
             try:
@@ -795,7 +853,6 @@ class PdfView(QAbstractScrollArea):
                     self._selection_line_rects = [line_r]
                     self._selected_text = " ".join(w[4] for w in line_words).strip()
                     self._last_selection_target = (pno, line_r)
-                    QApplication.clipboard().setText(self._selected_text)
                     self.textSelected.emit(self._selected_text)
                     self.popup.show_at(event.globalPosition().toPoint())
                     self.viewport().update()
@@ -848,7 +905,6 @@ class PdfView(QAbstractScrollArea):
                         self._selection_line_rects = [wr]
                         self._selected_text = w[4].strip()
                         self._last_selection_target = (pno, wr)
-                        QApplication.clipboard().setText(self._selected_text)
                         self.textSelected.emit(self._selected_text)
                         self.popup.show_at(event.globalPosition().toPoint())
                         self.viewport().update()
@@ -1031,7 +1087,6 @@ class PdfView(QAbstractScrollArea):
                                     max(r.y1 for r in self._selection_line_rects),
                                 )
                                 self._last_selection_target = (pno, union_rect)
-                                QApplication.clipboard().setText(self._selected_text)
                                 self.textSelected.emit(self._selected_text)
                                 self.popup.show_at(event.globalPosition().toPoint())
                             else:
@@ -1218,7 +1273,6 @@ class PdfView(QAbstractScrollArea):
                     self._selected_text = self.doc[pno].get_text("text").strip()
                     if line_rects:
                         self._last_selection_target = (pno, fitz.Rect(min(r.x0 for r in line_rects), min(r.y0 for r in line_rects), max(r.x1 for r in line_rects), max(r.y1 for r in line_rects)))
-                    QApplication.clipboard().setText(self._selected_text)
                     self.textSelected.emit(self._selected_text)
                     self.viewport().update()
                     event.accept()

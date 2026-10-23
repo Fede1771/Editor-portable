@@ -2,24 +2,35 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Sequence
 
 import pymupdf as fitz
 
+from .attachments import unique_path
+
 
 def _safe_excel_cell(val: object | None) -> str:
-    """Previene inyecciones de fórmulas maliciosas en Excel (CSV/formula injection)."""
+    """Normaliza un valor extraído a cadena literal para Excel sin insertar caracteres espurios (H20, N05)."""
     if val is None:
         return ""
-    s = str(val)
-    if s.startswith(("=", "+", "-", "@", "\t", "\r")):
-        return "'" + s
-    return s
+    return str(val)
+
+
+def _append_literal_row(ws, values: Sequence[object | None], next_row_idx: int) -> int:
+    """Escribe una fila en `ws` forzando tipo de celda texto (`data_type='s'`) sin evaluar fórmulas
+    ni alterar el valor literal con apóstrofos iniciales (H20, N05)."""
+    from openpyxl.cell.cell import TYPE_STRING
+
+    for col_idx, val in enumerate(values, start=1):
+        s = _safe_excel_cell(val)
+        cell = ws.cell(row=next_row_idx, column=col_idx)
+        cell._value = s
+        cell.data_type = TYPE_STRING
+    return next_row_idx + 1
 
 
 def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None = None) -> None:
-    """Convierte el documento PDF en vivo a Microsoft Word (.docx)."""
+    """Convierte el documento PDF en vivo a Microsoft Word (.docx) (H12, H26)."""
     from pdf2docx import Converter
     from .privacy import TempManager
 
@@ -35,14 +46,13 @@ def convert_to_word(doc: fitz.Document, out_docx_path: str, src_path: str | None
 
 
 def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
-    """Extrae tablas del PDF y las guarda en un libro de Microsoft Excel (.xlsx).
+    """Extrae tablas del PDF y las guarda en un libro de Microsoft Excel (.xlsx) como texto literal (H20, N05).
 
     Retorna la cantidad total de tablas extraídas.
     """
     import openpyxl
 
     wb = openpyxl.Workbook()
-    # Eliminar hoja por defecto
     default_sheet = wb.active
 
     total_tables = 0
@@ -53,17 +63,19 @@ def convert_to_excel(doc: fitz.Document, out_xlsx_path: str) -> int:
             total_tables += 1
             sheet_title = f"Pág {pno + 1} Tab {t_idx + 1}"[:31]
             ws = wb.create_sheet(title=sheet_title)
+            row_idx = 1
             for row in table.extract():
-                ws.append([_safe_excel_cell(cell) for cell in row])
+                row_idx = _append_literal_row(ws, row, row_idx)
 
     # Si no se detectaron tablas tabuladas estructuradas, exportar líneas de texto por renglón
     if total_tables == 0:
         ws = wb.create_sheet(title="Contenido Texto")
+        row_idx = 1
         for pno in range(doc.page_count):
-            ws.append([f"--- PÁGINA {pno + 1} ---"])
+            row_idx = _append_literal_row(ws, [f"--- PÁGINA {pno + 1} ---"], row_idx)
             for line in doc[pno].get_text("text").splitlines():
                 if line.strip():
-                    ws.append([_safe_excel_cell(line.strip())])
+                    row_idx = _append_literal_row(ws, [line.strip()], row_idx)
 
     if len(wb.sheetnames) > 1 and default_sheet in wb.worksheets:
         wb.remove(default_sheet)
@@ -80,7 +92,7 @@ def convert_to_images(
     dpi: int = 200,
     pages: Sequence[int] | None = None,
 ) -> list[str]:
-    """Exporta las páginas del PDF como imágenes de alta resolución a una carpeta."""
+    """Exporta las páginas del PDF como imágenes de alta resolución sin sobrescribir archivos existentes (H28)."""
     os.makedirs(out_dir, exist_ok=True)
     target_pages = list(pages) if pages is not None else list(range(doc.page_count))
     exported: list[str] = []
@@ -90,7 +102,7 @@ def convert_to_images(
         page = doc[pno]
         pix = page.get_pixmap(dpi=dpi)
         filename = f"pagina_{pno + 1:03d}.{ext}"
-        out_path = os.path.join(out_dir, filename)
+        out_path = unique_path(os.path.join(out_dir, filename))
         pix.save(out_path)
         exported.append(out_path)
 

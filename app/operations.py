@@ -280,8 +280,5 @@ def add_header_footer(doc: fitz.Document, pages: list[int], template: str, posit
 def add_background(doc: fitz.Document, pages: list[int], color: tuple) -> None:
     for p in pages:
         page = doc[p]
-        rect = page.rect * page.derotation_matrix
-        rect.normalize()
-        base = page.cropbox
-        rect = fitz.Rect(rect.x0 + base.x0, rect.y0 + base.y0, rect.x1 + base.x0, rect.y1 + base.y0)
+        rect = (page.rect * page.derotation_matrix).normalize()
         page.draw_rect(rect, color=None, fill=color, overlay=False)
