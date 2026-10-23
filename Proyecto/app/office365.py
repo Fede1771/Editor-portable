@@ -16,9 +16,7 @@ class OfficeConversionError(RuntimeError):
     """Office ausente, ocupado o conversión incompleta sin publicar su salida."""
 
 
-_APPS = {"word_docx": "Word", "word_pdf": "Word", "pdf_excel": "Excel",
-         "excel_pdf": "Excel", "powerpoint_pdf": "PowerPoint"}
-MAX_EXCEL_CELLS = 2_000_000
+_APPS = {"word_pdf": "Word", "excel_pdf": "Excel", "powerpoint_pdf": "PowerPoint"}
 
 
 @contextmanager
@@ -195,96 +193,26 @@ def _application(name, conn):
         pythoncom.CoUninitialize()
 
 
-def _m_string(value):
-    return '"' + str(value).replace('#', '#(#)').replace('"', '""') + '"'
-
-
-def _load_query(book, sheet, name, formula, *, headers=True):
-    book.Queries.Add(name, formula)
-    connection = 'OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;Location=' + name + ';Extended Properties=""'
-    query = sheet.QueryTables.Add(connection, sheet.Range("A1"), "SELECT * FROM [" + name + "]")
-    query.BackgroundQuery = False
-    query.CommandType = 2
-    query.FieldNames = headers
-    query.Refresh(False)
-    return query
-
-
-def _pdf_to_excel(app, source, target, private):
-    """Power Query interpreta el PDF; el libro final sólo contiene valores de texto."""
-    raw = app.Workbooks.Add(-4167)
-    final = app.Workbooks.Add(-4167)
-    source_m = 'Pdf.Tables(File.Contents(' + _m_string(source) + '),[Implementation="1.3",MultiPageTables=false])'
-    raw.Queries.Add("PDFSource", source_m)
-    sheet = raw.Worksheets(1)
-    _load_query(raw, sheet, "PDFMetadata", 'Table.RemoveColumns(PDFSource,{"Data"})')
-    metadata = sheet.UsedRange.Value2
-    rows = list(metadata[1:]) if isinstance(metadata, tuple) else []
-    tables = [r for r in rows if r[2] == "Table"]
-    selected = tables or [r for r in rows if r[2] == "Page"]
-    if not selected:
-        raise OfficeConversionError("Excel no encontró contenido tabular en el PDF. Aplicá OCR si es un escaneo.")
-    cells = 0
-    for index, entry in enumerate(selected):
-        intermediate = raw.Worksheets.Add()
-        formula = ('let D=PDFSource{[Id=' + _m_string(entry[0]) + ']}[Data] '
-                   'in Table.TransformColumnTypes(D,List.Transform(Table.ColumnNames(D),each {_,type text}))')
-        _load_query(raw, intermediate, "PDFData" + str(index), formula, headers=False)
-        area = intermediate.UsedRange
-        height, width = int(area.Rows.Count), int(area.Columns.Count)
-        cells += height * width
-        if cells > MAX_EXCEL_CELLS:
-            raise OfficeConversionError("El PDF supera el límite de celdas de esta conversión.")
-        values = area.Value2
-        if height == width == 1:
-            values = ((values,),)
-        dest = final.Worksheets(1) if index == 0 else final.Worksheets.Add()
-        dest.Name = ("Tabla " if tables else "Página ") + str(index + 1)
-        for start in range(0, height, 1000):
-            chunk = tuple(tuple("" if v is None else str(v) for v in row) for row in values[start:start + 1000])
-            region = dest.Range(dest.Cells(start + 1, 1), dest.Cells(start + len(chunk), width))
-            region.NumberFormat = "@"
-            region.Value2 = chunk
-        used = dest.UsedRange
-        used.Columns.AutoFit()
-        for column in range(1, width + 1):
-            item = dest.Columns(column)
-            item.ColumnWidth = min(float(item.ColumnWidth), 70)
-        used.WrapText = True
-        used.Rows.AutoFit()
-        # No copiar hojas ni conexiones: podrían retener el PDF temporal o consultas.
-        intermediate.Delete()
-    if private:
-        final.RemoveDocumentInformation(99)
-    final.SaveAs(target, FileFormat=51, AddToMru=False)
-    return len(tables)
-
-
 def _perform(app, operation, source, target, private):
     password = "EditorPDF-" + os.urandom(16).hex()
-    if operation in ("word_docx", "word_pdf"):
+    if operation == "word_pdf":
         document = app.Documents.Open(source, ConfirmConversions=False, ReadOnly=True,
                                       AddToRecentFiles=False, Visible=False, NoEncodingDialog=True,
                                       PasswordDocument=password, WritePasswordDocument=password)
-        if operation == "word_docx":
-            if private:
-                document.RemoveDocumentInformation(99)
-            document.SaveAs2(target, FileFormat=16, AddToRecentFiles=False)
-        else:
-            document.ExportAsFixedFormat(target, 17, OpenAfterExport=False)
+        document.ExportAsFixedFormat(target, 17, OpenAfterExport=False)
         return None
-    if operation == "pdf_excel":
-        return _pdf_to_excel(app, source, target, private)
     if operation == "excel_pdf":
         app.Workbooks.Add(-4167)
         app.Calculation = -4135
         document = app.Workbooks.Open(source, UpdateLinks=0, ReadOnly=True, AddToMru=False,
-                                     IgnoreReadOnlyRecommended=True, Password=password, WriteResPassword=password)
+                                      IgnoreReadOnlyRecommended=True, Password=password, WriteResPassword=password)
         document.ExportAsFixedFormat(0, target, OpenAfterPublish=False)
         return None
-    document = app.Presentations.Open(source, ReadOnly=True, Untitled=False, WithWindow=False)
-    document.SaveAs(target, 32)
-    return None
+    if operation == "powerpoint_pdf":
+        document = app.Presentations.Open(source, ReadOnly=True, Untitled=False, WithWindow=False)
+        document.SaveAs(target, 32)
+        return None
+    raise ValueError(f"Operación de Microsoft 365 desconocida: {operation}")
 
 
 def _office_process(conn, operation, source, target, private):

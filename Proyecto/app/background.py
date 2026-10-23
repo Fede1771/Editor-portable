@@ -71,11 +71,9 @@ def _pdf_process(conn, operation, raw, password, private_mode, args, kwargs):
         elif operation == "optimize":
             from .optimizer import optimize_document
             result = optimize_document(doc, *args, **kwargs)
-        elif operation in {"word", "excel", "images"}:
+        elif operation == "images":
             from . import conversion
-            target = {"word": conversion.convert_to_word, "excel": conversion.convert_to_excel,
-                      "images": conversion.convert_to_images}[operation]
-            result = target(doc, *args, **kwargs)
+            result = conversion.convert_to_images(doc, *args, **kwargs)
         elif operation == "inspect":
             result = {"pid": os.getpid(), "text": "".join(p.get_text() for p in doc),
                       "encryption": doc.metadata.get("encryption"), "private_mode": privacy.is_private_mode()}

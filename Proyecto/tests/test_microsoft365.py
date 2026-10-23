@@ -2,7 +2,6 @@
 from pathlib import Path
 import time
 
-import openpyxl
 import pymupdf as fitz
 import pytest
 
@@ -46,50 +45,6 @@ def test_m365_failed_office_export_keeps_previous_pdf(tmp_path, monkeypatch):
     assert not list(tmp_path.glob("*.tmp.pdf"))
 
 
-def test_m365_excel_uses_current_unsaved_pdf_and_literal_values(tmp_path, monkeypatch):
-    with fitz.open() as doc:
-        doc.new_page().insert_text((30, 50), "UNSAVED_EDIT")
-        captured = []
-        def native(kind, source, target):
-            assert kind == "pdf_excel"
-            captured.append(source)
-            with fitz.open(source) as snapshot:
-                assert "UNSAVED_EDIT" in snapshot[0].get_text()
-            book = openpyxl.Workbook()
-            book.active["A1"] = "=1+1"
-            book.active["A1"].data_type = "s"
-            book.save(target)
-            book.close()
-            return 1
-        monkeypatch.setattr(office365, "run_office", native)
-        output = tmp_path / "literal.xlsx"
-        assert conversion.convert_to_excel(doc, str(output)) == 1
-    assert not Path(captured[0]).exists()
-    book = openpyxl.load_workbook(output)
-    assert book.active["A1"].value == "=1+1" and book.active["A1"].data_type == "s"
-    book.close()
-
-
-def test_m365_invalid_formula_output_does_not_replace_previous_file(tmp_path, monkeypatch):
-    output = tmp_path / "report.xlsx"
-    book = openpyxl.Workbook()
-    book.active["A1"] = "OLD"
-    book.save(output)
-    book.close()
-    before = output.read_bytes()
-    def unsafe(kind, source, target):
-        book = openpyxl.Workbook()
-        book.active["A1"] = "=1+1"
-        book.save(target)
-        book.close()
-    monkeypatch.setattr(office365, "run_office", unsafe)
-    with fitz.open() as doc:
-        doc.new_page()
-        with pytest.raises(ValueError, match="fórmulas"):
-            conversion.convert_to_excel(doc, str(output))
-    assert output.read_bytes() == before
-
-
 def test_m365_timeout_terminates_only_worker(tmp_path, monkeypatch):
     source = tmp_path / "input.docx"
     source.write_bytes(b"DUMMY")
@@ -110,10 +65,6 @@ def test_m365_cleanup_rejects_reused_pid(monkeypatch):
             pytest.fail("No terminar un PID reutilizado")
     monkeypatch.setattr(office365.psutil, "Process", lambda pid: Unrelated())
     office365._stop_owned({"pid": 123, "created": 1, "name": "winword.exe"})
-
-
-def test_m365_m_literal_escapes_path_without_code_injection():
-    assert office365._m_string('a"#(lf)b') == '"a""#(#)(lf)b"'
 
 
 def test_m365_existing_powerpoint_is_not_opened_or_closed(monkeypatch):

@@ -131,30 +131,14 @@ def main(output_root: Path | None = None):
     doc.close()
     print(f"  -> OCR OK (reconocio {len(ocr_text.split())} palabras)")
 
-    # 5. Conversiones
-    print("[5/6] Probando conversiones...")
+    # 5. Exportar a imágenes
+    print("[5/6] Probando exportación a imágenes...")
     doc = fitz.open(str(pdf_path))
-    txt_path = out_dir / "export.txt"
-    conversion.convert_to_text(doc, str(txt_path))
-    assert txt_path.exists() and txt_path.stat().st_size > 0, "Fallo export txt"
-
-    html_path = out_dir / "export.html"
-    conversion.convert_to_html(doc, str(html_path))
-    assert html_path.exists(), "Fallo export html"
-
-    docx_path = out_dir / "export.docx"
-    conversion.convert_to_word(doc, str(docx_path), src_path=str(pdf_path))
-    assert docx_path.exists() and docx_path.stat().st_size > 0, "Fallo export docx"
-
-    xlsx_path = out_dir / "export.xlsx"
-    conversion.convert_to_excel(doc, str(xlsx_path))
-    assert xlsx_path.exists(), "Fallo export xlsx"
-
     img_dir = out_dir / "imagenes"
     conversion.convert_to_images(doc, str(img_dir), fmt="png", dpi=100)
     assert len(list(img_dir.glob("*.png"))) == 2, "Fallo export imagenes"
     doc.close()
-    print("  -> Conversiones OK")
+    print("  -> Exportación a imágenes OK")
 
     # 6. Optimizacion
     print("[6/6] Probando optimizacion...")
@@ -375,11 +359,6 @@ def main(output_root: Path | None = None):
     assert sanitize_attachment_name("test:stream.txt") == "test_stream.txt"
     assert sanitize_attachment_name("CON.txt") == "_CON.txt"
 
-    from app.conversion import _safe_excel_cell
-    assert _safe_excel_cell("=1+1") == "=1+1"
-    assert _safe_excel_cell("@SUM(A1:A10)") == "@SUM(A1:A10)"
-    assert _safe_excel_cell("-cmd|' /C calc'!A0") == "-cmd|' /C calc'!A0"
-    assert _safe_excel_cell("Texto normal") == "Texto normal"
 
     from app.forms import document_has_signatures
     doc_clean = fitz.open()

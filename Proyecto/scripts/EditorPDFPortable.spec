@@ -34,7 +34,7 @@ if os.path.isdir(tessdata_dir):
 
 binaries = []
 hiddenimports = []
-for pkg in ("fitz", "pymupdf", "pdf2docx", "openpyxl", "pypdf"):
+for pkg in ("fitz", "pymupdf", "pypdf"):
     tmp_ret = collect_all(pkg)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]

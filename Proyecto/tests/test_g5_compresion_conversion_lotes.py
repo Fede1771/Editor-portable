@@ -4,7 +4,6 @@ Cubre: H01, N01, H25, H20, N05, H28.
 from __future__ import annotations
 
 import os
-import openpyxl
 import pymupdf as fitz
 import pytest
 from PySide6.QtCore import QBuffer, QByteArray
@@ -157,35 +156,6 @@ def test_h25_optimize_uses_max_dpi_according_to_physical_display_size(tmp_path):
 # ---------------------------------------------------------------------------
 # H20 & N05: Exportación Excel bloquea fórmulas sin añadir apóstrofos literales
 # ---------------------------------------------------------------------------
-def test_h20_n05_excel_export_literal_text_without_formula_or_apostrophe(tmp_path):
-    """H20/N05: Cadenas como '=1+1', '-123.45', '@usuario', '+54 11' deben guardarse como texto literal (data_type='s')
-    sin evaluarse como fórmula y sin agregar apóstrofo inicial al valor."""
-    doc = fitz.open()
-    page = doc.new_page(width=400, height=300)
-    test_values = ["=1+1", "-123.45", "@usuario", "+54 11 4444"]
-    for idx, val in enumerate(test_values):
-        page.insert_text((40, 50 + idx * 25), val, fontsize=11)
-
-    out_xlsx = tmp_path / "export_literal.xlsx"
-    conversion.convert_to_excel(doc, str(out_xlsx))
-    doc.close()
-
-    wb = openpyxl.load_workbook(str(out_xlsx), data_only=False)
-    ws = wb.active
-    found_values = []
-    for row in ws.iter_rows():
-        for cell in row:
-            if cell.value is not None:
-                # Ninguna celda debe ser de tipo fórmula ('f')
-                assert cell.data_type != "f", f"Celda interpretada como fórmula: {cell.value}"
-                found_values.append(str(cell.value))
-    wb.close()
-
-    for expected in test_values:
-        assert expected in found_values, f"Valor '{expected}' alterado o ausente en {found_values}"
-        assert ("'" + expected) not in found_values, f"Apóstrofo espurio agregado a '{expected}'"
-
-
 # ---------------------------------------------------------------------------
 # H28: Exportación de imágenes y extracción de imágenes no deben sobrescribir
 # ---------------------------------------------------------------------------

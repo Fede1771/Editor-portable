@@ -187,7 +187,9 @@ def test_h37_h38_requirements_and_packaging_files():
     """H37/H38: requirements.txt declara openpyxl y versiones; .spec no tiene rutas absolutas ni data/lo_profile."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     req_txt = open(os.path.join(root, "requirements", "requirements.txt"), encoding="utf-8").read()
-    assert "openpyxl" in req_txt
+    assert "openpyxl" not in req_txt
+    assert "pdf2docx" not in req_txt
+    assert "PySide6" in req_txt
     assert ">=" in req_txt
 
     spec_txt = open(os.path.join(root, "scripts", "EditorPDFPortable.spec"), encoding="utf-8").read()

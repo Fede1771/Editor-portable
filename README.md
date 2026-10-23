@@ -24,7 +24,7 @@
 - **Organizar páginas:** combiná, dividí, reordená, rotá, recortá, extraé o eliminá páginas. Agregá numeración y marcas de agua.
 - **Reducir el peso:** usá perfiles de compresión para correo, archivo corporativo o legajos con mayor detalle de imágenes. El tamaño final depende del contenido.
 - **Reconocer escaneos:** aplicá OCR local en español e inglés para obtener texto buscable y copiable.
-- **Convertir documentos:** exportá PDF a Word o Excel y creá PDFs desde Word, Excel o PowerPoint con Microsoft 365. También exportá imágenes, texto y HTML.
+- **Crear y exportar:** creá PDFs desde imágenes o desde documentos de Word, Excel y PowerPoint con Microsoft 365 (`Ctrl + N`). Exportá páginas del PDF directamente a imágenes de alta resolución (PNG/JPEG).
 - **Completar formularios:** editá campos, casillas y listas de formularios AcroForm, y aplanalos cuando necesites fijar sus valores.
 - **Gestionar adjuntos:** consultá, agregá, extraé o eliminá los archivos incluidos dentro de un PDF.
 
@@ -38,7 +38,6 @@
 - **Limpieza de metadatos:** la copia anónima permite limpiar metadatos y acciones activas del PDF principal. Los adjuntos se conservan y no se inspeccionan recursivamente.
 - **Protección de firmas:** detecta estructuras de firma aplicada y avisa antes de reescribir el documento. No valida certificados; modificar un PDF firmado puede invalidar su firma.
 - **Conversiones protegidas:** los archivos Office de origen se abren como sólo lectura. La salida se valida antes de reemplazar el destino y, si la conversión falla, se conserva el archivo anterior.
-- **Datos literales en Excel:** al exportar un PDF, el XLSX guarda texto sin fórmulas ni conexiones al PDF temporal, evitando que el contenido extraído se evalúe como una fórmula.
 
 ---
 
@@ -48,12 +47,12 @@
 2. Elegí **Extraer todo…** y conservá completa la carpeta extraída, incluida **`_internal/`**.
 3. Abrí **`EditorPDFPortable.exe`** o **`Abrir_EditorPortable.bat`**. Arrastrá un PDF a la ventana o usá `Ctrl + O`.
 
-Para convertir un PDF a Word o Excel, elegí **Exportar / Convertir a…**. Para crear un PDF desde archivos Office, usá **Crear PDF desde archivos…** (`Ctrl + N`) y guardá el resultado con `Ctrl + S`.
+Para exportar páginas a imágenes, elegí **Exportar a… > Páginas a imágenes…**. Para crear un PDF desde imágenes o documentos de Office, usá **Crear PDF desde archivos…** (`Ctrl + N`) y guardá el resultado con `Ctrl + S`.
 
 ### 💻 Qué necesitás
 
 - **Windows de 64 bits.** El portable incluye sus bibliotecas; no requiere instalar Python.
-- **Microsoft 365 de escritorio instalado y activado** para las conversiones Office: Word para DOCX, Excel con Power Query PDF para XLSX y la aplicación correspondiente para convertir Office a PDF. La versión web no reemplaza estos requisitos.
+- **Microsoft 365 de escritorio instalado y activado** (opcional) si deseás crear PDFs a partir de documentos de Word, Excel o PowerPoint. La lectura, edición, compresión, OCR y exportación a imágenes de PDF funcionan de forma nativa sin Microsoft 365.
 - La lectura, edición y el OCR de PDF funcionan sin Microsoft 365. Para convertir una presentación, guardá tus cambios y cerrá PowerPoint antes de comenzar.
 
 Revisá el contenido y el diseño después de editar o convertir un documento, especialmente si contiene escaneos, tablas o firmas.

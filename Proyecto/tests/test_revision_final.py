@@ -73,20 +73,31 @@ def test_r04_owner_and_user_encryption_survives_undo_exports(tmp_path, qapp, pas
     tab.close_document()
 
 
-def test_r01_gui_excel_uses_process_job_and_current_unsaved_document(tmp_path, qapp, monkeypatch, no_dialogs):
+def test_r01_gui_images_uses_process_job_and_current_unsaved_document(tmp_path, qapp, monkeypatch, no_dialogs):
     win = MainWindow()
     d = document("CURRENT_UNSAVED")
     win._add_tab("", d, modified=True)
-    out = tmp_path / "gui.xlsx"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
-    # Si la GUI vuelve a usar el ejecutor de hilos, esta prueba debe fallar.
+    out_dir = tmp_path / "img_out"
+    out_dir.mkdir()
+    class DummyScope:
+        def pages(self, count, selected):
+            return list(range(count))
+    class DummyDlg:
+        scope = DummyScope()
+        def exec(self):
+            return QDialog.Accepted
+        def folder(self):
+            return str(out_dir)
+        def format(self):
+            return "png"
+        def dpi(self):
+            return 72
     import app.main_window as mw
+    monkeypatch.setattr(mw, "ConvertImagesDialog", lambda *a: DummyDlg())
     monkeypatch.setattr(mw, "run_blocking", lambda *a, **k: pytest.fail("PDF enviado al hilo"))
-    win.export_to_excel()
-    import openpyxl
-    wb = openpyxl.load_workbook(out)
-    assert any(c.value == "CURRENT_UNSAVED" for row in wb.active for c in row)
-    wb.close()
+    win.export_to_images()
+    exported = list(out_dir.glob("*.png"))
+    assert len(exported) == 1
     assert "CURRENT_UNSAVED" in d[0].get_text()
     dispose(win)
 
@@ -310,25 +321,15 @@ def test_r07_choice_display_labels_do_not_replace_export_values(qapp):
     d.close()
 
 
-def test_r12_word_failure_cleans_isolated_disk_temporary(monkeypatch, tmp_path):
-    from app import conversion
-    import pdf2docx
+def test_r12_failure_cleans_isolated_disk_temporary(monkeypatch, tmp_path):
     monkeypatch.setattr(privacy.tempfile, "tempdir", str(tmp_path))
     privacy._SESSION_PRIVATE_MODE = True
-    observed = []
-    class BrokenConverter:
-        def __init__(self, path):
-            observed.append(path)
-            assert os.path.dirname(path) == str(tmp_path / "EditorPDFPortable")
-            assert os.path.isfile(path + ".owner.json")
-            raise RuntimeError("converter failed")
-    monkeypatch.setattr(pdf2docx, "Converter", BrokenConverter)
-    d = document()
-    with pytest.raises(RuntimeError):
-        conversion.convert_to_word(d, str(tmp_path / "out.docx"))
-    assert observed and not os.path.exists(observed[0])
-    assert not os.path.exists(observed[0] + ".owner.json")
-    d.close()
+    temp_p = privacy.TempManager.create_temp_file(suffix=".tmp", content=b"test")
+    assert os.path.dirname(temp_p) == str(tmp_path / "EditorPDFPortable")
+    assert os.path.isfile(temp_p + ".owner.json")
+    privacy.TempManager.cleanup_all()
+    assert not os.path.exists(temp_p)
+    assert not os.path.exists(temp_p + ".owner.json")
 
 
 def test_r12_private_mode_is_passed_to_child(qapp):

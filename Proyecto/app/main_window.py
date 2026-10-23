@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 )
 
 from . import content_ops as cops
-from . import conversion as conv
 from . import creation
 from . import ocr
 from . import operations as ops
@@ -185,12 +184,8 @@ class MainWindow(QMainWindow):
         self.a_find_redact = self._act("Buscar y censurar…", self.find_and_redact, None, "Buscar texto y censurarlo en todo el documento")
         self.a_extract_imgs = self._act("Extraer todas las imágenes…", self.extract_all_images, None, "Guardar las imágenes incrustadas a una carpeta")
 
-        # Exportar / Convertir (Fase 6)
-        self.a_export_word = self._act("Microsoft Word (.docx)…", self.export_to_word, None, "Exportar PDF a documento Word")
-        self.a_export_excel = self._act("Microsoft Excel (.xlsx)…", self.export_to_excel, None, "Extraer tablas a hoja de cálculo Excel")
+        # Exportar páginas a imágenes
         self.a_export_images = self._act("Páginas a imágenes (PNG/JPEG)…", self.export_to_images, None, "Exportar páginas como imágenes de alta resolución")
-        self.a_export_text = self._act("Texto plano (.txt)…", self.export_to_text, None, "Exportar todo el texto plano")
-        self.a_export_html = self._act("Página web (.html)…", self.export_to_html, None, "Exportar como página HTML")
 
         # OCR, Compresión y Optimización
         self.a_ocr = self._act("Reconocer texto con OCR…", self.run_ocr, None, "Convertir documento escaneado a PDF con texto buscable")
@@ -203,8 +198,7 @@ class MainWindow(QMainWindow):
         self.a_clear_privacy = self._act("🧹 Limpiar historial y temporales…", self.clear_all_traces_now, None, "Destruir de inmediato archivos temporales e historial")
 
         self.utility_actions = [
-            self.a_export_word, self.a_export_excel, self.a_export_images,
-            self.a_export_text, self.a_export_html, self.a_ocr, self.a_compress,
+            self.a_export_images, self.a_ocr, self.a_compress,
             self.a_fill_forms, self.a_flatten_forms, self.a_attachments,
         ]
 
@@ -367,9 +361,8 @@ class MainWindow(QMainWindow):
         sub_tools.addAction(self.a_extract_imgs)
 
         # Exportar
-        sub_export = menu.addMenu("📤 Exportar / Convertir a…")
-        for a in (self.a_export_word, self.a_export_excel, self.a_export_images, self.a_export_text, self.a_export_html):
-            sub_export.addAction(a)
+        sub_export = menu.addMenu("📤 Exportar a…")
+        sub_export.addAction(self.a_export_images)
 
         # Visualización
         sub_view = menu.addMenu("👁️ Visualización")
@@ -1103,46 +1096,7 @@ class MainWindow(QMainWindow):
                 f"Se extrajeron {len(extracted)} imágenes en:\n{out_dir}",
             )
 
-    # ---------------------------------------------------------------- exportar / convertir (Fase 6)
-    def export_to_word(self):
-        tab = self.current_tab()
-        if not tab:
-            return
-        base = os.path.splitext(tab.path)[0] + ".docx" if tab.path else "documento.docx"
-        out_path, _ = QFileDialog.getSaveFileName(self, "Exportar a Microsoft Word", base, "Documento Word (*.docx)")
-        if not out_path:
-            return
-        try:
-            run_pdf_job(
-                self,
-                "Convirtiendo PDF a Microsoft Word (.docx)…\nEsto puede tardar unos segundos.",
-                "word", tab.doc, out_path,
-            )
-            QMessageBox.information(self, "Conversión completada", f"Se exportó exitosamente a:\n{out_path}")
-            self.status_msg.setText(f"Exportado a Word: {out_path}")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error de conversión", str(exc))
-
-    def export_to_excel(self):
-        tab = self.current_tab()
-        if not tab:
-            return
-        base = os.path.splitext(tab.path)[0] + ".xlsx" if tab.path else "tablas.xlsx"
-        out_path, _ = QFileDialog.getSaveFileName(self, "Exportar tablas a Excel", base, "Libro de Excel (*.xlsx)")
-        if not out_path:
-            return
-        try:
-            total_tables = run_pdf_job(
-                self,
-                "Extrayendo tablas a Excel…",
-                "excel", tab.doc, out_path,
-            )
-            msg = f"Se extrajeron {total_tables} tablas a:\n{out_path}" if total_tables else f"Se exportó el contenido a:\n{out_path}"
-            QMessageBox.information(self, "Exportación a Excel", msg)
-            self.status_msg.setText(f"Exportado a Excel: {out_path}")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error de exportación", str(exc))
-
+    # ---------------------------------------------------------------- exportar páginas como imágenes
     def export_to_images(self):
         tab = self.current_tab()
         if not tab:
@@ -1166,36 +1120,6 @@ class MainWindow(QMainWindow):
             self.status_msg.setText(f"Exportadas {len(exported)} imágenes a {out_dir}")
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error al exportar imágenes", str(exc))
-
-    def export_to_text(self):
-        tab = self.current_tab()
-        if not tab:
-            return
-        base = os.path.splitext(tab.path)[0] + ".txt" if tab.path else "documento.txt"
-        out_path, _ = QFileDialog.getSaveFileName(self, "Exportar a texto plano", base, "Archivo de texto (*.txt)")
-        if not out_path:
-            return
-        try:
-            conv.convert_to_text(tab.doc, out_path)
-            QMessageBox.information(self, "Exportación completada", f"Texto exportado en:\n{out_path}")
-            self.status_msg.setText(f"Exportado a texto: {out_path}")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error", str(exc))
-
-    def export_to_html(self):
-        tab = self.current_tab()
-        if not tab:
-            return
-        base = os.path.splitext(tab.path)[0] + ".html" if tab.path else "documento.html"
-        out_path, _ = QFileDialog.getSaveFileName(self, "Exportar a HTML", base, "Página Web (*.html)")
-        if not out_path:
-            return
-        try:
-            conv.convert_to_html(tab.doc, out_path)
-            QMessageBox.information(self, "Exportación completada", f"Página HTML exportada en:\n{out_path}")
-            self.status_msg.setText(f"Exportado a HTML: {out_path}")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error", str(exc))
 
     # ---------------------------------------------------------------- OCR y Optimización (Fases 5 y 10)
     def run_ocr(self):

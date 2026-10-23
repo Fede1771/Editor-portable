@@ -359,61 +359,24 @@ def test_v06_attachment_widget_does_not_resolve_untrusted_paths_in_icon_provider
 
 
 # ---------------------------------------------------------------------------
-# V07: Exportación atómica en convert_to_excel, convert_to_word, convert_to_text y convert_to_html
+# V07: Escritura atómica en _atomic_write_target
 # ---------------------------------------------------------------------------
-def test_v07_convert_to_excel_atomic_preserves_existing_file_on_io_error(tmp_path, monkeypatch):
-    import openpyxl
+def test_v07_atomic_write_target_preserves_existing_file_on_io_error(tmp_path):
+    target = tmp_path / "reporte.dat"
+    target.write_bytes(b"EXISTING_VALID_CONTENT")
+    before_bytes = target.read_bytes()
 
-    out_xlsx = tmp_path / "reporte.xlsx"
-    wb = openpyxl.Workbook()
-    wb.active["A1"] = "EXISTING_VALID_WORKBOOK"
-    wb.save(out_xlsx)
-    wb.close()
-    before_bytes = out_xlsx.read_bytes()
-
-    doc = fitz.open()
-    p = doc.new_page()
-    p.insert_text((72, 72), "Linea 1\nLinea 2")
-
-    def failing_save(operation, source, filename):
-        with open(filename, "wb") as f:
+    def failing_writer(temp_path):
+        with open(temp_path, "wb") as f:
             f.write(b"partial-corrupt")
-        raise OSError("disk full while writing xlsx")
-
-    from app import office365
-    monkeypatch.setattr(office365, "run_office", failing_save)
+        raise OSError("disk full while writing")
 
     with pytest.raises(OSError, match="disk full"):
-        conversion.convert_to_excel(doc, str(out_xlsx))
-    doc.close()
+        conversion._atomic_write_target(str(target), ".dat", failing_writer)
 
-    after_bytes = out_xlsx.read_bytes()
-    assert after_bytes == before_bytes
-    check_wb = openpyxl.load_workbook(out_xlsx, read_only=True)
-    assert check_wb.active["A1"].value == "EXISTING_VALID_WORKBOOK"
-    check_wb.close()
-    # Verificar que no hayan quedado temporales residuales
-    leftover = [p.name for p in tmp_path.iterdir() if p.name != "reporte.xlsx"]
+    assert target.read_bytes() == before_bytes
+    leftover = [p.name for p in tmp_path.iterdir() if p.name != "reporte.dat"]
     assert leftover == []
-
-
-def test_v07_convert_to_text_and_html_atomic_preserve_existing_on_failure(tmp_path, monkeypatch):
-    out_txt = tmp_path / "notas.txt"
-    out_txt.write_text("TEXTO_PREVIO_INTACTO", encoding="utf-8")
-
-    doc = fitz.open()
-    p = doc.new_page()
-    p.insert_text((72, 72), "Nuevo contenido")
-
-    monkeypatch.setattr(
-        fitz.Page,
-        "get_text",
-        lambda self, *a, **k: (_ for _ in ()).throw(OSError("fallo de lectura intermedio")),
-    )
-    with pytest.raises(OSError):
-        conversion.convert_to_text(doc, str(out_txt))
-    assert out_txt.read_text(encoding="utf-8") == "TEXTO_PREVIO_INTACTO"
-    doc.close()
 
 
 # ---------------------------------------------------------------------------
