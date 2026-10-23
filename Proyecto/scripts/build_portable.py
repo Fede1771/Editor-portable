@@ -9,9 +9,9 @@ import sys
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dist-dir", type=Path, default=root / "dist")
+    parser.add_argument("--dist-dir", type=Path, default=root.parent / "Programa")
     parser.add_argument("--work-dir", type=Path, default=root / "build")
     parser.add_argument("--no-zip", action="store_true")
     args = parser.parse_args()
@@ -20,7 +20,7 @@ def main() -> int:
     venv = root / ".venv/Scripts/python.exe"
     python = str(venv) if venv.is_file() else sys.executable
     cmd = [python, "-m", "PyInstaller", "--clean", "-y", "--distpath", str(dist),
-           "--workpath", str(work), str(root / "EditorPDFPortable.spec")]
+           "--workpath", str(work), str(root / "scripts/EditorPDFPortable.spec")]
     print("Compilando el ejecutable portable...", flush=True)
     proc = subprocess.run(cmd, cwd=root)
     if proc.returncode:
@@ -30,7 +30,7 @@ def main() -> int:
     if not exe.is_file():
         print("No se encontró el ejecutable de salida.", file=sys.stderr)
         return 1
-    shutil.copy2(root / "Abrir_EditorPortable.bat", bundle / "Abrir_EditorPortable.bat")
+    shutil.copy2(root.parent / "Abrir_EditorPortable.bat", bundle / "Abrir_EditorPortable.bat")
     print(f"Ejecutable generado: {exe}")
     if not args.no_zip:
         archive = shutil.make_archive(str(dist / "EditorPDFPortable"), "zip", str(dist), "EditorPDFPortable")

@@ -186,13 +186,13 @@ def test_h48_html_to_pdf_stops_on_unplaceable_content():
 def test_h37_h38_requirements_and_packaging_files():
     """H37/H38: requirements.txt declara openpyxl y versiones; .spec no tiene rutas absolutas ni data/lo_profile."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    req_txt = open(os.path.join(root, "requirements.txt"), encoding="utf-8").read()
+    req_txt = open(os.path.join(root, "requirements", "requirements.txt"), encoding="utf-8").read()
     assert "openpyxl" in req_txt
     assert ">=" in req_txt
 
-    spec_txt = open(os.path.join(root, "EditorPDFPortable.spec"), encoding="utf-8").read()
+    spec_txt = open(os.path.join(root, "scripts", "EditorPDFPortable.spec"), encoding="utf-8").read()
     assert "C:/Users/feder" not in spec_txt
     assert "lo_profile" not in spec_txt
 
-    bat_txt = open(os.path.join(root, "Abrir_EditorPortable.bat"), encoding="utf-8").read()
+    bat_txt = open(os.path.join(root, os.pardir, "Abrir_EditorPortable.bat"), encoding="utf-8").read()
     assert "%~dp0EditorPDFPortable.exe" in bat_txt

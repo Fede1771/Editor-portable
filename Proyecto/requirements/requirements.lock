@@ -1,5 +1,5 @@
 # Entorno probado: Windows x64 / CPython 3.14
-# Dependencias de ejecución, pruebas y empaquetado; instalar con pip -r requirements.lock.
+# Ejecución, pruebas y empaquetado; instalar con pip -r requirements/requirements.lock.
 altgraph==0.17.5
 colorama==0.4.6
 et_xmlfile==2.0.0

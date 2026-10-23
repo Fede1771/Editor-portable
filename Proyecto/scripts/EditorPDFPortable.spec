@@ -13,7 +13,7 @@ if sys.platform == "win32":
         os.path.join(windows_dir, "System32"), windows_dir,
     ])
 
-project_root = os.path.abspath(SPECPATH)
+project_root = os.path.dirname(os.path.abspath(SPECPATH))
 data_dir = os.path.join(project_root, "data")
 
 datas = []

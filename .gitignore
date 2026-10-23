@@ -11,6 +11,7 @@ __pycache__/
 # PyInstaller temporales y distribución
 build/
 dist/
+/Programa/
 *.spec.bak
 
 # Archivos temporales del sistema
@@ -20,9 +21,13 @@ Thumbs.db
 Desktop.ini
 .pytest_cache/
 tests/temp_output/
+/Proyecto/tests/temp_output/
 diagnostico_runtime/
 data/lo_profile/
+/Proyecto/data/lo_profile/
 
 # Informes locales de auditoría (no subir al repositorio)
+docs/auditoria/local/
+/Proyecto/docs/auditoria/local/
 informes_auditoria/
 Informes_para_Antigravity.md

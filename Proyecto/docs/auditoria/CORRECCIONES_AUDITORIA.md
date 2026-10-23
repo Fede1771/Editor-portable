@@ -46,20 +46,22 @@ El empaquetado aísla el `PATH` usado para resolver DLLs. Se reprodujo un fallo 
 
 El entorno de versiones exactas probado es Windows x64 con CPython 3.14:
 
+Los comandos de desarrollo siguientes se ejecutan desde `Proyecto/`.
+
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install -r requirements\requirements.lock
 .\.venv\Scripts\python.exe -m pytest tests -q
-.\.venv\Scripts\python.exe build_portable.py
+.\.venv\Scripts\python.exe scripts\build_portable.py
 ```
 
-`requirements.txt` contiene dependencias de ejecución. `requirements-dev.txt` agrega pruebas y empaquetado; `requirements.lock` fija las versiones del entorno completo probado. El lock no contiene hashes de los wheels ni sustituye una revisión de vulnerabilidades de terceros.
+Los archivos de `requirements/` contienen las dependencias: `requirements.txt` declara las de ejecución; `requirements-dev.txt` agrega pruebas y empaquetado; `requirements.lock` fija las versiones del entorno completo probado. El lock no contiene hashes de los wheels ni sustituye una revisión de vulnerabilidades de terceros.
 
 Para comprobar el runtime empaquetado sin abrir documentos reales:
 
 ```powershell
 $env:PYINSTALLER_SUPPRESS_SPLASH_SCREEN = '1'
-.\dist\EditorPDFPortable\EditorPDFPortable.exe --self-test .\diagnostico_runtime
+..\Programa\EditorPDFPortable\EditorPDFPortable.exe --self-test .\diagnostico_runtime
 ```
 
 El resultado se escribe en `self_test_result.json`. La prueba crea documentos sintéticos, usa preferencias aisladas y comprueba procesos independientes, Word, Excel, imágenes, compresión cifrada y OCR. Los archivos de diagnóstico se pueden eliminar después de revisar el resultado. Esta comprobación no requiere Microsoft Office, escáner ni impresora.

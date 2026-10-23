@@ -1,107 +1,142 @@
-# 📄 Editor PDF Portable
+# Editor PDF Portable
 
-[![Windows](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
-[![Offline](https://img.shields.io/badge/Seguridad-100%25%20Offline-success)](https://github.com/Fede1771/Editor-portable)
-[![Sesión privada](https://img.shields.io/badge/Privacidad-Sesi%C3%B3n%20privada-blueviolet)](https://github.com/Fede1771/Editor-portable)
-[![No Admin](https://img.shields.io/badge/Instalaci%C3%B3n-Sin%20Permisos%20de%20Admin-orange)](https://github.com/Fede1771/Editor-portable)
-[![Licencia](https://img.shields.io/badge/Licencia-MIT-brightgreen)](LICENSE)
+**Editor de PDF para Windows de 64 bits, con procesamiento local y OCR en español e inglés.**
 
-> **Visualizador y editor de documentos PDF profesional, ultraligero y 100% offline para Windows.**  
-> Diseñado para estudios jurídicos, aseguradoras, peritos, empresas y profesionales que manejan documentación sensible. No requiere instalación, no requiere permisos de administrador y nunca envía datos a internet.
+Permite leer, editar, organizar, censurar y convertir documentos desde una interfaz con pestañas. La versión portable funciona sin instalar Python y se puede llevar en una carpeta o pendrive.
 
----
+**[Descargar el ZIP de la última versión publicada](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)** · [Ver versiones publicadas](https://github.com/Fede1771/Editor-portable/releases)
 
-## ⬇️ Descarga Directa para Windows
+## Empezar a usarlo
 
-Hacé clic en el siguiente enlace para descargar la versión completa y lista para usar:
+### Si descargaste el portable
 
-### 👉 **[DESCARGAR EDITOR PDF PORTABLE (.ZIP)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)**
+1. Descargá `EditorPDFPortable.zip` desde las versiones publicadas.
+2. Elegí **Extraer todo…** y conservá completa la carpeta extraída.
+3. Abrí `EditorPDFPortable.exe` o `Abrir_EditorPortable.bat`.
+4. Arrastrá un PDF a la ventana o usá `Ctrl + O`.
 
-*(Compatible con Windows 10 y Windows 11 de 64 bits)*
+La carpeta `_internal/` debe permanecer junto al ejecutable: contiene las bibliotecas y los recursos necesarios para funcionar.
 
----
+### Si estás en esta carpeta de trabajo
 
-## ⚡ Cómo Usar en 3 Pasos
+Hacé doble clic en **`Abrir_EditorPortable.bat`**. El acceso abre el ejecutable de `Programa/EditorPDFPortable/`.
 
-1. **Descargá** el archivo `EditorPDFPortable.zip` desde el enlace de arriba.
-2. Hacé clic derecho sobre el archivo descargado y elegí **"Extraer todo..."** (o descomprimilo en un pendrive o carpeta).
-3. Entrá a la carpeta extraída y hacé doble clic en **`EditorPDFPortable.exe`** (o en el acceso directo `Abrir_EditorPortable.bat`).
+```text
+Editor portable/
+├── Abrir_EditorPortable.bat    Abrir el editor
+├── README.md                  Esta guía
+├── Programa/                  Ejecutable y ZIP para entregar
+└── Proyecto/                  Código, herramientas, pruebas y documentación
+```
 
-¡Listo! Ya podés arrastrar cualquier archivo PDF a la ventana o presionar `Ctrl + O` para comenzar a trabajar.
+`Programa/` se genera al compilar y no se incluye en Git. Si descargaste únicamente el código fuente, seguí los pasos de desarrollo y compilación de este documento.
 
----
+## Qué podés hacer
 
-## 🚀 Características Principales
+| Función | Operaciones disponibles |
+|---|---|
+| Lectura y búsqueda | Abrir PDFs en pestañas, navegar con miniaturas, ajustar zoom, buscar y copiar texto. |
+| Edición de contenido | Reemplazar bloques de texto e insertar texto, imágenes y enlaces. |
+| Anotaciones | Resaltar, subrayar, tachar, dibujar y agregar notas o comentarios. |
+| Censura | Eliminar contenido mediante un rectángulo o una búsqueda de texto. |
+| Páginas | Combinar, insertar, extraer, duplicar, reordenar, rotar, recortar, eliminar y dividir documentos. |
+| Presentación | Agregar marcas de agua, fondos, encabezados, pies y numeración. |
+| Formularios | Completar campos AcroForm, casillas, listas y grupos de selección; aplanar formularios. |
+| Compresión | Aplicar perfiles de calidad y resolución para reducir el tamaño de un PDF. |
+| OCR | Convertir páginas escaneadas en PDFs con texto buscable, con modelos locales de español e inglés. |
+| Exportación | Generar Word (`.docx`), Excel (`.xlsx`), PNG/JPEG, texto plano y HTML. |
+| Adjuntos | Ver, agregar, extraer y eliminar archivos embebidos. |
+| Creación | Crear PDFs desde imágenes, texto, HTML, archivos Office y escáneres compatibles. |
 
-### ✍️ Edición In Situ de Texto y Contenido
-- Modificá títulos, fechas, importes o párrafos directamente sobre el documento.
-- Respeta automáticamente la tipografía, tamaño de fuente, color y alineación sin romper el diseño ni los fondos originales.
-- Salvaguarda automática para evitar truncamiento o pérdidas de texto.
+La fidelidad de la edición y las conversiones depende de las fuentes y de la estructura del documento. La reducción de tamaño depende de su contenido y del perfil elegido. En documentos escaneados, aplicá OCR antes de buscar texto.
 
-### 🗜️ Compresión Inteligente de Archivos (Pólizas y Legajos)
-- Reducí drásticamente el peso de tus PDFs para enviarlos por correo electrónico o subirlos a portales web con límites estrictos.
-- **Perfiles preconfigurados:**
-  - 📧 **Póliza Ligera (< 5 MB):** Compresión alta y optimización a 130 DPI para correo.
-  - 📂 **Archivo Digital Corporativo:** Equilibrio óptimo de nitidez en pantalla (180 DPI, calidad 80%).
-  - ⚖️ **Legajo Pericial / Siniestros:** Máxima fidelidad en fotos de daños, sellos y firmas periciales (300 DPI, calidad 92%).
-- Subconjunto avanzado de fuentes (`font subsetting`) y compactación de objetos en streams.
+## Requisitos
 
-### 🛡️ Privacidad y sesión privada
-- **Modo Sesión Privada:** Bloquea la escritura de historial y rutas de archivos en el Registro de Windows.
-- **Temporales aislados:** El historial de edición permanece en RAM en modo privado. Las conversiones a Word/Office, adjuntos y escáner pueden utilizar disco. Se intenta sobrescribir y limpiar esos temporales; no se garantiza ausencia de rastros ni recuperación imposible, especialmente ante cierres anómalos.
-- **Copia anónima y sanitizada:** Eliminá con un clic nombres de usuario, autores de comentarios, rutas de carpetas y rastros XML/XMP.
+| Uso | Requisito |
+|---|---|
+| Ejecutar el portable | Windows de 64 bits y la carpeta extraída completa. |
+| Exportar PDF a Word o Excel | Las bibliotecas necesarias están incluidas en el portable. |
+| Crear PDF desde Word, Excel o PowerPoint | LibreOffice instalado y disponible para la aplicación. |
+| Crear PDF desde un escáner | Escáner y controlador compatibles con WIA en Windows. |
+| Trabajar con el código | Entorno probado: Windows x64 y CPython 3.14. |
 
-### 🔏 Firmas Digitales y Formularios Interactivos (AcroForms)
-- Detección automática de **firmas digitales criptográficas**: Alertas de protección para evitar invalidar firmas existentes al guardar.
-- Visualización, completado y aplanado (`flatten`) de formularios interactivos con protección de campos de solo lectura.
+## Privacidad, censura y firmas
 
-### 📎 Explorador de Archivos Adjuntos Embebidos
-- Panel lateral dedicado para inspeccionar, extraer y adjuntar archivos dentro del PDF.
-- Protección integrada contra archivos ejecutables maliciosos y prevención de ataques de salto de directorio (`anti path-traversal`).
+Los documentos se procesan localmente. Abrir un enlace web desde la aplicación utiliza el navegador y puede acceder a internet.
 
-### 📑 Organización y Gestión de Páginas
-- Insertá páginas en blanco o páginas procedentes de otros PDFs.
-- Reordená páginas arrastrándolas en el panel de miniaturas.
-- Duplicá, rotá, recortá o eliminá páginas fácilmente.
-- Dividí documentos masivos por cantidad fija de páginas, rangos personalizados o marcadores de índice.
-- Numeración correlativa tipo Bates (`Pág. 1 de 10`), marcas de agua y fondos institucionales.
+- **Sesión privada:** evita guardar recientes y mantiene el historial de edición en RAM. Algunas conversiones, adjuntos y operaciones de escáner necesitan temporales en disco. La aplicación intenta limpiarlos; este modo no garantiza ausencia de rastros en el equipo.
+- **Copia anónima:** permite limpiar metadatos y acciones activas del PDF principal. Los archivos adjuntos se conservan y no se inspeccionan recursivamente.
+- **Firmas digitales:** detecta estructuras de firma aplicada y avisa antes de reescribir el documento. No valida certificados ni cadenas de confianza; modificar un PDF firmado puede invalidar su firma.
+- **Censura:** elimina contenido del resultado guardado. Conservá el original por separado y revisá la copia después de guardarla y reabrirla.
 
-### 🔍 OCR Integrado y Búsqueda Rápida
-- **Reconocimiento Óptico de Caracteres (OCR):** Convertí documentos escaneados o fotos de documentos en texto seleccionable y copiable.
-- Barra de búsqueda flotante con navegación de coincidencias sin saltos.
-
-### 🔄 Conversión a Otros Formatos
-- Convertí a **Microsoft Word** (`.docx`), **Microsoft Excel** (`.xlsx` con protección contra inyección de fórmulas), imágenes en alta resolución o texto plano.
-
----
-
-## ⌨️ Atajos de Teclado Más Útiles
+## Atajos útiles
 
 | Atajo | Acción |
-| :--- | :--- |
-| `Ctrl + O` | Abrir documento PDF |
-| `Ctrl + S` | Guardar cambios |
-| `Ctrl + Shift + S` | Guardar como... |
-| `Ctrl + Shift + C` | Comprimir PDF con perfiles inteligentes |
-| `Ctrl + P` | Imprimir documento |
-| `Ctrl + F` | Buscar texto en el documento |
-| `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer cambios |
-| `Ctrl + 1` / `Ctrl + 2` | Ajustar vista al ancho / a página completa |
-| `F4` | Mostrar / ocultar panel lateral de miniaturas y adjuntos |
-| `V` | Modo selección de texto |
-| `T` | Herramienta de texto / edición in situ |
-| `R` | Herramienta de censura / tachado permanente |
-| `Supr` | Eliminar páginas seleccionadas |
+|---|---|
+| `Ctrl + O` | Abrir PDF |
+| `Ctrl + S` / `Ctrl + Shift + S` | Guardar / Guardar como |
+| `Ctrl + P` | Imprimir |
+| `Ctrl + F` | Buscar texto |
+| `F3` / `Shift + F3` | Coincidencia siguiente / anterior |
+| `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer |
+| `Ctrl + 1` / `Ctrl + 2` | Ajustar al ancho / a la página |
+| `Ctrl + Shift + C` | Comprimir PDF |
+| `Ctrl + Shift + A` | Administrar adjuntos |
+| `F4` | Mostrar u ocultar el panel lateral |
+| `H` / `V` | Desplazar / Seleccionar texto |
+| `T` / `R` | Insertar texto / Censurar |
 
----
+## Desarrollo
 
-## 🔒 Seguridad y privacidad
+Ejecutá estos comandos en PowerShell desde la raíz del repositorio.
 
-- **100% Offline:** No realiza conexiones a internet, no recopila telemetría ni sube información a servidores en la nube. Todo el procesamiento se realiza localmente en tu computadora.
-- **Portabilidad Real:** Podés llevarlo en un pendrive USB o en una carpeta compartida de red corporativa y ejecutarlo directamente sin necesidad de instalar librerías adicionales.
+### Preparar el entorno
 
----
+```powershell
+python -m venv Proyecto\.venv
+.\Proyecto\.venv\Scripts\python.exe -m pip install -r Proyecto\requirements\requirements.lock
+```
 
-## ⚖️ Licencia
+El archivo `requirements.lock` fija las versiones del entorno probado. `Proyecto/requirements/requirements.txt` declara las dependencias de ejecución, y `requirements-dev.txt` agrega pruebas y empaquetado con rangos de versiones.
 
-Distribuido bajo la Licencia MIT. Consultá el archivo [LICENSE](LICENSE) para más información.
+### Abrir desde el código y ejecutar las pruebas
+
+```powershell
+.\Proyecto\run.bat
+.\Proyecto\.venv\Scripts\python.exe -m pytest Proyecto\tests -q
+```
+
+La configuración de pytest mantiene su caché dentro de `Proyecto/`.
+
+### Compilar el portable
+
+```powershell
+.\Proyecto\.venv\Scripts\python.exe Proyecto\scripts\build_portable.py
+```
+
+Se generan:
+
+- `Programa/EditorPDFPortable/`: carpeta ejecutable completa.
+- `Programa/EditorPDFPortable.zip`: paquete para entregar.
+- `Proyecto/build/`: archivos intermedios de compilación.
+
+El script resuelve el proyecto desde su ubicación y admite `--dist-dir`, `--work-dir` y `--no-zip`. Para distribuir el programa, usá el ZIP generado.
+
+### Comprobar el ejecutable compilado
+
+```powershell
+$env:PYINSTALLER_SUPPRESS_SPLASH_SCREEN = '1'
+.\Programa\EditorPDFPortable\EditorPDFPortable.exe --self-test .\Proyecto\diagnostico_runtime
+```
+
+La autoprueba usa documentos sintéticos y preferencias aisladas. Comprueba procesos independientes, exportación a Word y Excel, imágenes, compresión cifrada y OCR. Escribe el resultado en `Proyecto/diagnostico_runtime/self_test_result.json` y devuelve código `0` cuando todas las comprobaciones pasan. No requiere Microsoft Office, escáner ni impresora.
+
+## Validación y documentación
+
+La reorganización del **23 de octubre de 2026** se verificó con **193 pruebas automatizadas aprobadas** y **6 comprobaciones del portable aprobadas**, ambas con código de salida `0`. También se comprobó el acceso de la carpeta principal y que el ZIP contiene el mismo ejecutable probado.
+
+- [Estructura del proyecto y ubicación de cada archivo](Proyecto/docs/ESTRUCTURA.md).
+- [Registro técnico de correcciones y alcance de seguridad](Proyecto/docs/auditoria/CORRECCIONES_AUDITORIA.md).
+- [Reportar un problema](https://github.com/Fede1771/Editor-portable/issues): indicá los pasos para reproducirlo, el mensaje de error y si ocurre en el portable o al ejecutar desde Python.
+
+Los ejecutables, entornos Python, cachés, archivos de compilación e informes locales de auditoría están excluidos del repositorio.
