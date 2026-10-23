@@ -40,9 +40,14 @@ if proc.returncode != 0:
 
 exe_path = os.path.join(dist_dir, "EditorPDFPortable", "EditorPDFPortable.exe")
 if os.path.isfile(exe_path):
+    import shutil
     print("==================================================")
     print("¡COMPILACIÓN EXITOSA!")
     print(f"Ejecutable generado en: {exe_path}")
+    zip_dest = os.path.join(dist_dir, "EditorPDFPortable")
+    print("Generando paquete comprimido EditorPDFPortable.zip...")
+    shutil.make_archive(zip_dest, "zip", dist_dir, "EditorPDFPortable")
+    print(f"Paquete listo para distribución en: {zip_dest}.zip")
     print("==================================================")
 else:
     print("El archivo ejecutable no fue encontrado en la carpeta dist.")

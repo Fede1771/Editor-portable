@@ -6,15 +6,28 @@ Diseñada con una **interfaz moderna de una sola fila** (estilo Chrome / Acrobat
 
 ---
 
+## 📥 Descarga Directa (Versión Portable)
+
+Podés descargar el paquete portable listo para usar sin instalar nada en tu equipo:
+
+### 👉 **[Descargar EditorPDFPortable.zip (Última versión)](https://github.com/Fede1771/Editor-portable/releases/latest)**
+
+> **📌 Instrucciones de uso para usuarios:**
+> 1. Descargá el archivo **`EditorPDFPortable.zip`** desde el enlace superior.
+> 2. Hacé clic derecho sobre el archivo descargado y seleccioná **Extraer todo...**
+> 3. Entrá a la carpeta extraída y hacé doble clic en **`EditorPDFPortable.exe`** (o en `Abrir_EditorPortable.bat`).
+> 
+> *Nota:* El ejecutable requiere su carpeta `_internal` que contiene las librerías nativas, por lo que siempre deben permanecer juntos en la misma carpeta. No requiere permisos de administrador ni conexión a internet.
+
+---
+
 ## 🚀 Modos de Ejecución y Distribución
 
-### 1. Versión Portable (Para usuarios y despliegue en la empresa)
+### 1. En la Empresa o en un Pendrive (Modo Portable)
 - **Ejecutable directo:** `dist\EditorPDFPortable\EditorPDFPortable.exe`
 - **Lanzador rápido:** `Abrir_EditorPortable.bat`
-- **Distribución corporativa:**
-  - **Sin instalación:** No requiere privilegios de administrador (UAC) ni dependencias externas.
-  - **Carpeta compartida o USB:** Basta con copiar la carpeta `dist\EditorPDFPortable` (o comprimirla en `.zip`) en un recurso de red (`\\servidor\Apps\`) o memoria USB.
-  - **Despliegue con Microsoft Intune:** Puede empaquetarse en `.intunewin` y publicarse en el *Portal de Empresa* para auto-instalación en un clic.
+- **Distribución en red:** Podés copiar la carpeta `dist\EditorPDFPortable` en una carpeta compartida de red de solo lectura (ej. `\\servidor\Apps\EditorPDFPortable\`) y crear un acceso directo al escritorio para los empleados.
+- **Despliegue con Microsoft Intune:** Puede empaquetarse en `.intunewin` y publicarse en el *Portal de Empresa* para auto-instalación en 1 clic.
 
 ### 2. Modo Desarrollo (Código Fuente)
 - Ejecutá `run.bat` o desde PowerShell:
@@ -39,6 +52,8 @@ Diseñada con una **interfaz moderna de una sola fila** (estilo Chrome / Acrobat
 - **Anotaciones y trazo:** Lápiz libre (`P`), notas adhesivas (`N`), resaltador fluorescente, subrayado y tachado.
 
 ### 🗜️ Compresión Inteligente para Aseguradoras (`Ctrl+Shift+C`)
+- **Subconjunto de fuentes (`subset_fonts`):** Analiza y descarta glifos tipográficos no utilizados en el documento, logrando reducciones drásticas incluso en PDFs de solo texto.
+- **Streams de Objetos y Deflate profundo:** Comprime tablas internas de objetos y flujos binarios.
 - **📧 Envío por Correo / Póliza Ligera (< 5 MB):** Máxima compresión a 130 DPI con sanitización de metadatos para envíos por email sin rebotes.
 - **📂 Archivo Digital Corporativo:** Balance óptimo entre fidelidad en pantalla y peso reducido (180 DPI, calidad 80%).
 - **⚖️ Legajo Pericial / Siniestros:** Máxima nitidez para fotos de daños, sellos periciales y firmas (300 DPI, calidad 92%).
@@ -97,8 +112,9 @@ Ejecuta las validaciones integrales de edición, OCR, compresión, privacidad y 
 .\.venv\Scripts\python.exe tests\test_suite.py
 ```
 
-### Recompilar el Ejecutable Portable
-Genera el paquete distribuible actualizado en `dist\EditorPDFPortable\`:
+### Recompilar el Paquete Portable
+Genera automáticamente la carpeta portable y el archivo comprimido `dist\EditorPDFPortable.zip`:
 ```powershell
 .\.venv\Scripts\python.exe build_portable.py
 ```
+*(El archivo `dist\EditorPDFPortable.zip` resultante es el que se sube a las Releases de GitHub para que los usuarios lo descarguen).*
