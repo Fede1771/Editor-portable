@@ -1,12 +1,13 @@
 # 📄 Editor PDF Portable
 
 [![Windows](https://img.shields.io/badge/Plataforma-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
-[![Procesamiento local](https://img.shields.io/badge/Procesamiento-Local-success)](#-seguridad-y-privacidad)
-[![Microsoft 365](https://img.shields.io/badge/Office-Microsoft%20365-orange)](#-qué-necesitás)
+[![Procesamiento local](https://img.shields.io/badge/Procesamiento-100%25%20Local-success)](#-seguridad-y-privacidad)
+[![Privacidad](https://img.shields.io/badge/Privacidad-Cero%20Huella-blue)](#-seguridad-y-privacidad)
+[![Sin Instalación](https://img.shields.io/badge/Portable-Sin%20instalación-informational)](#-cómo-empezar)
 
-> **Leé, editá, organizá y convertí documentos PDF desde una misma aplicación.**
+> **Leé, editá, organizá, censurá y creá documentos PDF desde una única aplicación portable para Windows.**
 >
-> Incluye OCR en español e inglés, censura de información y herramientas para trabajar con pólizas, legajos, formularios y documentación de la compañía.
+> Diseñado para trabajar de forma ágil, privada y sin conexión con pólizas, legajos, formularios, contratos y documentación corporativa.
 
 ---
 
@@ -14,49 +15,89 @@
 
 [![Descargar ZIP para Windows](https://img.shields.io/badge/DESCARGAR_ZIP-Para_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)
 
-[Ver versiones publicadas](https://github.com/Fede1771/Editor-portable/releases)
+[📦 Ver todas las versiones publicadas](https://github.com/Fede1771/Editor-portable/releases)
 
 ---
 
-## 🚀 Qué podés hacer
+## 🚀 Funcionalidades principales
 
-- **Leer y editar:** abrí varios PDFs en pestañas, buscá texto, modificá bloques de texto y agregá imágenes, enlaces o comentarios.
-- **Organizar páginas:** combiná, dividí, reordená, rotá, recortá, extraé o eliminá páginas. Agregá numeración y marcas de agua.
-- **Reducir el peso:** usá perfiles de compresión para correo, archivo corporativo o legajos con mayor detalle de imágenes. El tamaño final depende del contenido.
-- **Reconocer escaneos:** aplicá OCR local en español e inglés para obtener texto buscable y copiable.
-- **Crear y exportar:** creá PDFs desde imágenes o desde documentos de Word, Excel y PowerPoint con Microsoft 365 (`Ctrl + N`). Exportá páginas del PDF directamente a imágenes de alta resolución (PNG/JPEG).
-- **Completar formularios:** editá campos, casillas y listas de formularios AcroForm, y aplanalos cuando necesites fijar sus valores.
-- **Gestionar adjuntos:** consultá, agregá, extraé o eliminá los archivos incluidos dentro de un PDF.
+### 📑 Edición y lectura
+- **Edición directa de texto:** Modificá bloques de texto existentes respetando tipografía, tamaño y alineación original, o insertá nuevos cuadros de texto.
+- **Visualización flexible:** Navegación en pestañas múltiples, modo continuo, una página o dos páginas, zoom fluido y rotación de vista.
+- **Búsqueda interactiva:** Buscador integrado con resaltado de coincidencias y navegación rápida.
+
+### ✂️ Organización de páginas
+- **Manipulación completa:** Combiná varios documentos, dividí PDFs, reordená páginas con arrastrar y soltar, rotá, duplicá o eliminá.
+- **Herramientas de página:** Insertá páginas en blanco o extraé páginas a un archivo nuevo.
+- **Diseño y estructura:** Agregá numeración de página, encabezados, pies y marcas de agua personalizadas.
+
+### ✍️ Anotaciones y formularios
+- **Herramientas de marcado:** Resaltado de texto, subrayado, tachado y dibujo libre a mano alzada.
+- **Notas adhesivas:** Añadí comentarios y observaciones emergentes en cualquier parte del documento.
+- **AcroForms:** Completá formularios interactivos (campos de texto, casillas de verificación, opciones) y **aplaná formularios** para fijar permanentemente los datos completados.
+
+### 🔍 OCR y Reconocimiento de texto
+- **OCR local integrado:** Procesá documentos escaneados e imágenes mediante Tesseract (español e inglés) para transformarlos en PDFs con texto seleccionable, copiable y buscable.
+- **100% offline:** El reconocimiento óptico se ejecuta íntegramente en tu procesador, sin enviar documentos a la nube ni consumir datos.
+
+### 🗜️ Optimización y compresión
+- **Compresión inteligente:** Perfiles específicos según el destino (envío por correo electrónico, archivo digital de bajo peso o legajos de alta resolución).
+- **Control de resolución:** Ajuste automático de DPI y compresión de imágenes incrustadas manteniendo la legibilidad.
+
+### 🛡️ Censura y privacidad (Cero Huella)
+- **Censura destructiva:** Ocultá datos confidenciales (DNI, nombres, datos bancarios) por selección manual de área o mediante búsqueda automática de patrones. El contenido original se purga definitivamente del archivo.
+- **Modo Sesión Privada:** No registra documentos recientes ni persiste rutas en el registro del sistema; limpia temporales al cerrar.
+- **Limpieza de metadatos:** Eliminá autores, títulos, software creador e historiales del archivo PDF para compartir copias anónimas y seguras.
+- **Protección de firmas digitales:** Detección de firmas existentes y advertencia previa antes de modificar el documento para evitar invalidar firmas válidas por accidente.
+
+### 📥 Creación y exportación a imágenes
+- **Crear PDF desde archivos (`Ctrl + N`):** Generá documentos PDF nuevos a partir de imágenes (`.png`, `.jpg`, `.bmp`, `.tiff`) o documentos de Office (`.docx`, `.xlsx`, `.pptx` requiriendo Microsoft 365 local instalado).
+- **Exportar a imágenes:** Guardá las páginas del documento como imágenes independientes de alta definición (PNG o JPEG) con selección personalizada de páginas y resolución (DPI).
+- **Gestión de adjuntos:** Consultá, extraé, incrustá o eliminá archivos adjuntos embebidos dentro del PDF.
 
 ---
 
 ## 🔒 Seguridad y privacidad
 
-- **Procesamiento local:** el editor procesa los documentos en el equipo. Las conversiones Office utilizan las aplicaciones instaladas de Microsoft 365, sujetas a las políticas y servicios de la compañía. Abrir enlaces web puede acceder a internet.
-- **Sesión privada:** evita guardar documentos recientes y mantiene el historial de edición en RAM. Algunas operaciones necesitan temporales en disco; se intenta limpiarlos al finalizar, sin garantizar ausencia de rastros.
-- **Censura de información:** elimina contenido mediante un rectángulo o una búsqueda de texto. Conservá el original y revisá la copia guardada antes de compartirla.
-- **Limpieza de metadatos:** la copia anónima permite limpiar metadatos y acciones activas del PDF principal. Los adjuntos se conservan y no se inspeccionan recursivamente.
-- **Protección de firmas:** detecta estructuras de firma aplicada y avisa antes de reescribir el documento. No valida certificados; modificar un PDF firmado puede invalidar su firma.
-- **Conversiones protegidas:** los archivos Office de origen se abren como sólo lectura. La salida se valida antes de reemplazar el destino y, si la conversión falla, se conserva el archivo anterior.
+- **Procesamiento estrictamente local:** Todos los archivos permanecen en tu computadora. El editor no incluye telemetría, no recolecta analíticas ni envía datos a servidores externos.
+- **Censura real:** Al censurar texto o imágenes, los datos subyacentes se borran físicamente del PDF, impidiendo su recuperación mediante copia de texto o extracción de capas.
+- **Cero dependencias externas:** No requiere Java, LibreOffice ni Python preinstalado. Todo viene empaquetado en el directorio del programa.
 
 ---
 
 ## ⚡ Cómo empezar
 
-1. **Descargá el ZIP** con el botón de arriba.
-2. Elegí **Extraer todo…** y conservá completa la carpeta extraída, incluida **`_internal/`**.
-3. Abrí **`EditorPDFPortable.exe`** o **`Abrir_EditorPortable.bat`**. Arrastrá un PDF a la ventana o usá `Ctrl + O`.
-
-Para exportar páginas a imágenes, elegí **Exportar a… > Páginas a imágenes…**. Para crear un PDF desde imágenes o documentos de Office, usá **Crear PDF desde archivos…** (`Ctrl + N`) y guardá el resultado con `Ctrl + S`.
-
-### 💻 Qué necesitás
-
-- **Windows de 64 bits.** El portable incluye sus bibliotecas; no requiere instalar Python.
-- **Microsoft 365 de escritorio instalado y activado** (opcional) si deseás crear PDFs a partir de documentos de Word, Excel o PowerPoint. La lectura, edición, compresión, OCR y exportación a imágenes de PDF funcionan de forma nativa sin Microsoft 365.
-- La lectura, edición y el OCR de PDF funcionan sin Microsoft 365. Para convertir una presentación, guardá tus cambios y cerrá PowerPoint antes de comenzar.
-
-Revisá el contenido y el diseño después de editar o convertir un documento, especialmente si contiene escaneos, tablas o firmas.
+1. **Descargá el archivo ZIP** usando el botón superior o desde la sección de [Releases](https://github.com/Fede1771/Editor-portable/releases).
+2. **Extraé el contenido** en cualquier carpeta de tu disco local o pendrive (asegurate de conservar la subcarpeta `_internal/`).
+3. **Ejecutá `EditorPDFPortable.exe`** o hacé doble clic en `Abrir_EditorPortable.bat`.
+4. Arrastrá cualquier archivo PDF a la ventana o presioná `Ctrl + O` para abrirlo.
 
 ---
 
-[📘 Detalles de Microsoft 365](Proyecto/docs/MICROSOFT365.md) · [🛡️ Registro técnico de seguridad](Proyecto/docs/auditoria/CORRECCIONES_AUDITORIA.md) · [🐛 Reportar un problema](https://github.com/Fede1771/Editor-portable/issues)
+## ⌨️ Atajos de teclado más utilizados
+
+| Atajo | Acción |
+|---|---|
+| `Ctrl + O` | Abrir documento PDF |
+| `Ctrl + S` | Guardar cambios |
+| `Ctrl + Shift + S` | Guardar como copia nueva |
+| `Ctrl + N` | Crear PDF desde archivos (imágenes u Office) |
+| `Ctrl + W` | Cerrar pestaña actual |
+| `Ctrl + F` | Buscar texto en el documento |
+| `Ctrl + P` | Imprimir documento |
+| `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer acción |
+| `Ctrl + +` / `Ctrl + -` | Aumentar / Reducir zoom |
+| `Ctrl + Shift + C` | Comprimir y optimizar PDF |
+| `Ctrl + Shift + A` | Administrador de archivos adjuntos |
+
+---
+
+## 💻 Requisitos del sistema
+
+- **Sistema Operativo:** Windows 10 o Windows 11 (64 bits).
+- **Permisos:** No requiere permisos de administrador ni instalación en el sistema.
+- **Microsoft 365 de escritorio (opcional):** Únicamente necesario si deseás crear PDFs a partir de archivos de Word, Excel o PowerPoint mediante `Ctrl + N`. Todas las demás funciones (lectura, edición, anotaciones, OCR, formularios, compresión y exportación a imágenes) funcionan de forma autónoma.
+
+---
+
+[📘 Documentación de Microsoft 365](Proyecto/docs/MICROSOFT365.md) · [🛡️ Registro técnico de seguridad y auditoría](Proyecto/docs/auditoria/CORRECCIONES_AUDITORIA.md) · [🐛 Reportar un problema o sugerencia](https://github.com/Fede1771/Editor-portable/issues)
