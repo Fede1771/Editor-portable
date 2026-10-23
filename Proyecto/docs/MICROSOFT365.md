@@ -32,6 +32,31 @@ Se requieren Microsoft 365 de escritorio para Windows, activación válida y las
 
 `pywin32` y `psutil` se distribuyen con el portable. Microsoft 365 no se incluye en el ZIP. `openpyxl` se utiliza para verificar los XLSX y `pdf2docx` prepara el DOCX intermedio.
 
+## Uso y diagnóstico
+
+Para PDF → Word o Excel, abrí el PDF y elegí la aplicación de destino en **Exportar / Convertir a…**. La conversión incluye los cambios sin guardar del documento actual. Para Office → PDF, usá **Crear PDF desde archivos…** (`Ctrl + N`); el resultado se abre en una pestaña nueva que debés guardar con `Ctrl + S`.
+
+| Problema | Qué revisar |
+|---|---|
+| No se inicia la aplicación de Office. | Abrila manualmente y comprobá su activación y que no esté esperando configuración inicial. La suscripción web no sustituye la instalación local. |
+| PowerPoint ya está abierto. | Guardá tus presentaciones, cerrá PowerPoint y reintentá. |
+| Excel no encuentra contenido tabular. | Comprobá que el PDF tenga texto seleccionable. Aplicá OCR si es un escaneo y revisá el texto reconocido. |
+| Excel exporta un PDF con contenido recortado. | Revisá los anchos de columna, el área de impresión y la escala del archivo de origen. |
+| La conversión supera el tiempo máximo. | Revisá contraseñas, avisos pendientes de Office y restricciones corporativas. Registrá el mensaje exacto si necesitás reportarlo. |
+
+Para ejecutar las ocho comprobaciones del portable desde PowerShell en la raíz del repositorio:
+
+```powershell
+$env:PYINSTALLER_SUPPRESS_SPLASH_SCREEN = '1'
+$prueba = Start-Process -FilePath '.\Programa\EditorPDFPortable\EditorPDFPortable.exe' `
+    -ArgumentList '--self-test ".\Proyecto\diagnostico_runtime"' `
+    -WindowStyle Hidden -Wait -PassThru
+$prueba.ExitCode
+Get-Content -LiteralPath '.\Proyecto\diagnostico_runtime\self_test_result.json'
+```
+
+La autoprueba requiere Word y Excel instalados y activados. Usa documentos sintéticos y preferencias del editor aisladas; no necesita escáner ni impresora. Devuelve código `0` si pasan todas las comprobaciones y guarda el detalle en el JSON indicado. Los archivos de diagnóstico se pueden eliminar después de revisarlos.
+
 ## Verificación del 23/10/2026
 
 Entorno: Windows x64, CPython 3.14 y Microsoft 365 de escritorio, versión `16.0.20527.20088` (`O365ProPlusRetail`, x64).
