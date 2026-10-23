@@ -108,6 +108,7 @@ class WelcomeWidget(QWidget):
 
     openFileRequested = Signal()
     openRecentRequested = Signal(str)
+    createFromFilesRequested = Signal()
     blankDocRequested = Signal()
     combineRequested = Signal()
 
@@ -122,7 +123,7 @@ class WelcomeWidget(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20)
 
         card = QFrame()
-        card.setMaximumWidth(580)
+        card.setMaximumWidth(650)
         card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         card_layout = QVBoxLayout(card)
@@ -177,12 +178,21 @@ class WelcomeWidget(QWidget):
         self.btn_open = QPushButton("📂  Abrir archivo PDF…")
         self.btn_open.setCursor(QCursor(Qt.PointingHandCursor))
         self.btn_open.setFixedHeight(34)
+        self.btn_open.setToolTip("Abrir archivo PDF existente (Ctrl+O)")
         self.btn_open.clicked.connect(self.openFileRequested.emit)
         btn_row.addWidget(self.btn_open)
+
+        self.btn_create_files = QPushButton("📑  Crear PDF desde archivos…")
+        self.btn_create_files.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_create_files.setFixedHeight(34)
+        self.btn_create_files.setToolTip("Crear PDF desde archivos (Ctrl+N)")
+        self.btn_create_files.clicked.connect(self.createFromFilesRequested.emit)
+        btn_row.addWidget(self.btn_create_files)
 
         self.btn_blank = QPushButton("📄  Documento en blanco")
         self.btn_blank.setCursor(QCursor(Qt.PointingHandCursor))
         self.btn_blank.setFixedHeight(34)
+        self.btn_blank.setToolTip("Crear documento PDF en blanco A4")
         self.btn_blank.clicked.connect(self.blankDocRequested.emit)
         btn_row.addWidget(self.btn_blank)
 

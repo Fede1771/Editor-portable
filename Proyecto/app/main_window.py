@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.welcome = WelcomeWidget(self)
         self.welcome.openFileRequested.connect(self.open_dialog)
         self.welcome.openRecentRequested.connect(self.open_file)
+        self.welcome.createFromFilesRequested.connect(self.create_from_files)
         self.welcome.blankDocRequested.connect(self.create_blank)
         self.welcome.combineRequested.connect(lambda: self._create_from_dialog([]))
 
