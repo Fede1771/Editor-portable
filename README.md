@@ -24,6 +24,8 @@
 ### 📑 Edición y lectura de PDFs
 - **Edición directa de texto:** Modificá bloques de texto existentes respetando tipografía, tamaño, color y alineación original, o insertá nuevos cuadros de texto donde necesites.
 - **Visualización cómoda:** Navegación en pestañas múltiples, modo continuo, una página o dos páginas, zoom fluido y rotación de vista.
+- **Impresión (`Ctrl + P`):** Elegí entre las impresoras locales o de red instaladas en Windows; imprimí todo el documento, la página actual, un rango o las páginas seleccionadas en las miniaturas, incluyendo los cambios sin guardar.
+- **Edición sin saltos:** Al editar, deshacer o rehacer se conserva la posición de lectura y el desplazamiento dentro de la página.
 - **Búsqueda interactiva:** Buscador integrado con resaltado de coincidencias y navegación rápida entre resultados.
 
 ### ✂️ Organización y maquetación de páginas

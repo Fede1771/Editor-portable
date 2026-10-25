@@ -729,6 +729,9 @@ class DocTab(QWidget):
         old.close()
 
     def _refresh(self, select: list[int] | None = None, goto: int | None = None):
+        # Una edición en la página visible no debe llevar el visor a su comienzo.
+        target = goto if goto is not None else (select[0] if select else None)
+        target_visible = target is not None and self.view.is_page_visible(target)
         self.view.reload(self.doc)
         self.thumbs.rebuild(select)
         self.bookmarks.load(self.doc)
@@ -736,10 +739,10 @@ class DocTab(QWidget):
         self.attachments.reload()
         self._sync_side_tabs()
         self.check_security()
-        if goto is not None:
-            self.view.goto_page(goto)
-        elif select:
-            self.view.goto_page(select[0])
+        if target is not None and not target_visible:
+            self.view.goto_page(target)
+        if not select:
+            self.thumbs.select_page(self.view.current_page)
         self.edited.emit()
 
     def _on_order_changed(self, order: list[int], selected_rows: list[int]):

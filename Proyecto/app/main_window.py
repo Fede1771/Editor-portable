@@ -9,7 +9,7 @@ import tempfile
 
 import pymupdf as fitz
 from PySide6.QtCore import QStandardPaths, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QStackedWidget,
@@ -393,7 +393,7 @@ class MainWindow(QMainWindow):
         # Atajos válidos aunque el menú no tenga el foco
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_side, self.a_find, self.a_find_next, self.a_find_prev,
-                  self.a_open, self.a_save, self.a_save_as, self.a_close, self.a_quit,
+                  self.a_open, self.a_save, self.a_save_as, self.a_print, self.a_close, self.a_quit,
                   self.a_new_files, self.a_combine, self.a_compress,
                   self.a_undo, self.a_redo, self.a_pg_rot_l, self.a_pg_rot_r,
                   self.a_move_up, self.a_move_down,
@@ -693,43 +693,38 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab:
             return
-        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrinter, QPrinterInfo
+        from .printing import print_pdf
+
+        printers = QPrinterInfo.availablePrinters()
+        if not printers:
+            QMessageBox.warning(
+                self, "Sin impresoras instaladas",
+                "Windows no informa impresoras instaladas. Agregá una impresora local o de red "
+                "en Configuración > Impresoras y escáneres y volvé a intentar.",
+            )
+            return
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        if not printer.isValid():
+            printer.setPrinterName(printers[0].printerName())
         printer.setDocName(os.path.basename(tab.path) or "Documento")
         dlg = QPrintDialog(printer, self)
         dlg.setWindowTitle("Imprimir documento PDF")
+        dlg.setMinMax(1, tab.doc.page_count)
+        dlg.setFromTo(1, tab.doc.page_count)
+        dlg.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
+        dlg.setOption(QAbstractPrintDialog.PrintDialogOption.PrintCurrentPage, True)
+        dlg.setOption(QAbstractPrintDialog.PrintDialogOption.PrintSelection, bool(tab.thumbs.selected_rows()))
         if dlg.exec() != QDialog.Accepted:
             return
 
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        painter = QPainter(printer)
         try:
-            from_pg = printer.fromPage() - 1 if printer.fromPage() > 0 else 0
-            to_pg = printer.toPage() - 1 if printer.toPage() > 0 else tab.doc.page_count - 1
-            from_pg = max(0, min(tab.doc.page_count - 1, from_pg))
-            to_pg = max(from_pg, min(tab.doc.page_count - 1, to_pg))
-
-            dpi = printer.resolution()
-            from .viewer import render_bounded_pixmap
-
-            first = True
-            for pno in range(from_pg, to_pg + 1):
-                if not first:
-                    printer.newPage()
-                first = False
-                page = tab.doc[pno]
-                pm = render_bounded_pixmap(page, dpi=dpi, alpha=False)
-                img = QImage(pm.samples, pm.width, pm.height, pm.stride, QImage.Format_RGB888)
-                target_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
-                scaled = img.scaled(target_rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                x = target_rect.x() + (target_rect.width() - scaled.width()) / 2
-                y = target_rect.y() + (target_rect.height() - scaled.height()) / 2
-                painter.drawImage(int(x), int(y), scaled)
+            print_pdf(tab.doc, printer, tab.view.current_page, tab.thumbs.selected_rows())
             self.status_msg.setText("Documento enviado a la impresora.")
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error de impresión", f"No se pudo completar la impresión:\n{exc}")
         finally:
-            painter.end()
             QApplication.restoreOverrideCursor()
 
     # --------------------------------------------------------------- controles

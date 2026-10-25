@@ -367,8 +367,17 @@ class PdfView(QAbstractScrollArea):
         step = 2 if self._mode == MODE_TWO else 1
         self.goto_page(self._current - step)
 
+    def is_page_visible(self, index: int) -> bool:
+        rect = self._page_rects.get(index)
+        visible = QRectF(self.horizontalScrollBar().value(), self.verticalScrollBar().value(),
+                         self.viewport().width(), self.viewport().height())
+        return rect is not None and rect.intersects(visible)
+
     def reload(self, doc: fitz.Document | None = None):
         """Vuelve a leer el documento (tras modificarlo) invalidando búsquedas y selecciones obsoletas (H23)."""
+        old_sizes = self._sizes
+        old_x = self.horizontalScrollBar().value()
+        old_y = self.verticalScrollBar().value()
         if doc is not None:
             self.doc = doc
         self.page_count = self.doc.page_count
@@ -389,6 +398,9 @@ class PdfView(QAbstractScrollArea):
         self.popup.hide()
         self._current = min(self._current, max(0, self.page_count - 1))
         self._relayout()
+        if self._sizes == old_sizes:
+            self.horizontalScrollBar().setValue(old_x)
+            self.verticalScrollBar().setValue(old_y)
 
     # ------------------------------------------------------------- búsqueda
     def search(self, text: str) -> int:
