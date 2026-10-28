@@ -179,3 +179,90 @@ def test_expand_table_undo_redo(qapp):
     finally:
         tab.close()
 
+
+def test_find_text_block_in_table_cells():
+    from app import content_ops as cops
+
+    doc = _create_sample_doc_with_table()
+    page = doc[0]
+
+    # Clic directo sobre texto de celda existente
+    b = cops.find_text_block_at(page, fitz.Point(70, 130))
+    assert b is not None
+    assert "Dato Fila 1 Col A" in b["text"]
+
+    # Clic en espacio vacío de la fila inferior (lejos del texto, no debe enganchar la fila superior)
+    b_empty = cops.find_text_block_at(page, fitz.Point(300, 250))
+    assert b_empty is None
+    doc.close()
+
+
+def test_tool_table_interactive_drag_and_drop(qapp):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from app.viewer import PdfView, TOOL_TABLE
+
+    doc = _create_sample_doc_with_table()
+    view = PdfView(doc)
+    view.set_tool(TOOL_TABLE)
+
+    emitted = []
+    view.tableRowExpandRequested.connect(lambda *args: emitted.append(args))
+
+    # Forzar dimensiones y layout
+    view.resize(800, 800)
+    view.show()
+    qapp.processEvents()
+
+    # Obtener posición en viewport de la línea divisoria (Y=100)
+    pno = 0
+    page_target = view._page_rects[pno]
+    pt_split = view._map_point(pno, fitz.Point(200, 100)) + page_target.topLeft()
+
+    # 1. Mover el cursor a la línea
+    me_move = QMouseEvent(QMouseEvent.MouseMove, pt_split, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    view.mouseMoveEvent(me_move)
+    assert view._hover_table_info is not None
+
+    # 2. Presionar el mouse para iniciar arrastre
+    me_press = QMouseEvent(QMouseEvent.MouseButtonPress, pt_split, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    view.mousePressEvent(me_press)
+    assert view._table_drag_active is True
+
+    # 3. Arrastrar hacia abajo (+35 pt)
+    pt_drag = view._map_point(pno, fitz.Point(200, 135)) + page_target.topLeft()
+    me_drag = QMouseEvent(QMouseEvent.MouseMove, pt_drag, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    view.mouseMoveEvent(me_drag)
+    assert view._table_drag_current_y > view._table_drag_start_y
+
+    # 4. Soltar el mouse para aplicar
+    me_release = QMouseEvent(QMouseEvent.MouseButtonRelease, pt_drag, Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    view.mouseReleaseEvent(me_release)
+    assert view._table_drag_active is False
+    assert len(emitted) == 1
+    page_idx, y_split, delta_y, bbox, cols = emitted[0]
+    assert page_idx == 0
+    assert abs(y_split - 100.0) < 5.0
+    assert abs(delta_y - 35.0) < 5.0
+
+    view.close()
+    doc.close()
+
+
+def test_copy_shortcut_and_clipboard(qapp):
+    from PySide6.QtWidgets import QApplication
+    from app.viewer import PdfView
+
+    doc = _create_sample_doc_with_table()
+    view = PdfView(doc)
+    sample_text = "Texto de prueba para portapapeles"
+    view._selected_text = sample_text
+
+    view._copy_selection()
+    assert QApplication.clipboard().text() == sample_text
+
+    view.close()
+    doc.close()
+
+
+

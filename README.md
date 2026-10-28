@@ -30,7 +30,7 @@
 
 ### ✂️ Organización y maquetación de páginas
 - **Gestión integral:** Combiná varios documentos, dividí PDFs, reordená páginas con arrastrar y soltar, rotá, duplicá o eliminá.
-- **Ampliación inteligente de filas y grillas:** Detectá tablas y filas automáticamente (con PyMuPDF) o definí un corte horizontal personalizado para ampliar el alto de cualquier fila; todo el contenido inferior se desplaza elásticamente hacia abajo sin tapar ni superponer información, extendiendo los bordes de la grilla.
+- **Ampliación interactiva e inteligente de filas y grillas:** Con la herramienta **📐 Ampliar tabla** (`B` o barra de herramientas), posá el cursor sobre el borde inferior de cualquier fila y **arrastralo elásticamente hacia abajo con el mouse**; el sistema detecta cuadrículas automáticamente, extiende las líneas divisorias de la tabla y desplaza todo el contenido inferior sin tapar ni superponer información. También disponible mediante diálogo con corte numérico de coordenadas.
 - **Herramientas de página:** Insertá páginas en blanco en cualquier posición o extraé páginas seleccionadas a un archivo PDF nuevo.
 - **Diseño y membrete:** Agregá numeración de página automática, encabezados, pies de página y marcas de agua personalizadas.
 
@@ -89,6 +89,8 @@
 | `Ctrl + N` | Crear PDF desde archivos (imágenes u Office) |
 | `Ctrl + W` | Cerrar pestaña actual |
 | `Ctrl + F` | Buscar texto en el documento |
+| `Ctrl + C` | Copiar texto seleccionado al portapapeles |
+| `B` | Herramienta de ampliación interactiva de tablas con el mouse |
 | `Ctrl + P` | Imprimir documento |
 | `Ctrl + Z` / `Ctrl + Y` | Deshacer / Rehacer acción |
 | `Ctrl + +` / `Ctrl + -` | Aumentar / Reducir zoom |

@@ -676,10 +676,12 @@ def find_text_block_at(
             if exp.contains(point):
                 target_span = s
                 break
-            d = fitz.Point(point).distance_to(sb)
-            if d < min_dist and d <= 18.0:
-                min_dist = d
-                target_span = s
+            v_dist = max(0.0, sb.y0 - point.y, point.y - sb.y1)
+            if v_dist <= 5.0:
+                d = fitz.Point(point).distance_to(sb)
+                if d < min_dist and d <= 15.0:
+                    min_dist = d
+                    target_span = s
 
         if target_span is None:
             return None

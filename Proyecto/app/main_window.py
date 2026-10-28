@@ -35,7 +35,7 @@ from .welcome import WelcomeWidget, add_recent_file, get_recent_files, clear_rec
 from .viewer import (
     FIT_NONE, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
     TOOL_HIGHLIGHT, TOOL_IMAGE, TOOL_LINK, TOOL_NOTE, TOOL_PAN, TOOL_PEN,
-    TOOL_REDACT, TOOL_SELECT, TOOL_STRIKEOUT, TOOL_TEXT, TOOL_UNDERLINE,
+    TOOL_REDACT, TOOL_SELECT, TOOL_STRIKEOUT, TOOL_TABLE, TOOL_TEXT, TOOL_UNDERLINE,
 )
 
 ZOOM_PRESETS = ["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%"]
@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
         self.a_blank_doc = self._act("Documento en blanco (A4)", self.create_blank)
         self.a_undo = self._act("Deshacer", lambda: self._tab_do("undo"), "Ctrl+Z")
         self.a_redo = self._act("Rehacer", lambda: self._tab_do("redo"), "Ctrl+Y")
+        self.a_copy = self._act("Copiar", self._copy_current_selection, "Ctrl+C", "Copiar texto seleccionado al portapapeles")
 
         self.a_zoom_in = self._act("＋", lambda: v("zoom_in"), "Ctrl+=", "Acercar")
         self.a_zoom_out = self._act("－", lambda: v("zoom_out"), "Ctrl+-", "Alejar")
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
         self.a_tool_text = self._act("✍ Texto", lambda: self._set_active_tool(TOOL_TEXT), "T", "Insertar cuadro de texto", checkable=True)
         self.a_tool_redact = self._act("⬛ Censurar", lambda: self._set_active_tool(TOOL_REDACT), "R", "Censurar / Redactar permanentemente", checkable=True)
         self.a_tool_image = self._act("🖼 Imagen", lambda: self._set_active_tool(TOOL_IMAGE), "I", "Insertar imagen en la página", checkable=True)
+        self.a_tool_table = self._act("📐 Ampliar tabla", lambda: self._set_active_tool(TOOL_TABLE), "B", "Ampliar filas de tabla arrastrando con el mouse", checkable=True)
         self.a_tool_link = self._act("🔗 Enlace", lambda: self._set_active_tool(TOOL_LINK), "L", "Insertar enlace web o salto de página", checkable=True)
         self.a_tool_pen = self._act("✏ Lápiz", lambda: self._set_active_tool(TOOL_PEN), "P", "Dibujar a mano alzada", checkable=True)
         self.a_tool_highlight = self._act("🖍 Resaltar", lambda: self._set_active_tool(TOOL_HIGHLIGHT), "Shift+H", "Resaltar texto o área", checkable=True)
@@ -176,7 +178,7 @@ class MainWindow(QMainWindow):
         self.tool_group.setExclusive(True)
         for a in (
             self.a_tool_pan, self.a_tool_select, self.a_tool_text, self.a_tool_redact,
-            self.a_tool_image, self.a_tool_link, self.a_tool_pen, self.a_tool_highlight,
+            self.a_tool_image, self.a_tool_table, self.a_tool_link, self.a_tool_pen, self.a_tool_highlight,
             self.a_tool_underline, self.a_tool_strikeout, self.a_tool_note,
         ):
             self.tool_group.addAction(a)
@@ -270,6 +272,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.a_tool_text)
         tb.addAction(self.a_tool_redact)
         tb.addAction(self.a_tool_image)
+        tb.addAction(self.a_tool_table)
 
         btn_annot = QToolButton()
         btn_annot.setText("✏️ Anotar ▾")
@@ -358,6 +361,7 @@ class MainWindow(QMainWindow):
         sub_tools.addAction(self.a_flatten_forms)
         sub_tools.addAction(self.a_attachments)
         sub_tools.addSeparator()
+        sub_tools.addAction(self.a_tool_table)
         sub_tools.addAction(self.a_expand_table)
         sub_tools.addSeparator()
         sub_tools.addAction(self.a_find_redact)
@@ -398,10 +402,10 @@ class MainWindow(QMainWindow):
                   self.a_rot_r, self.a_side, self.a_find, self.a_find_next, self.a_find_prev,
                   self.a_open, self.a_save, self.a_save_as, self.a_print, self.a_close, self.a_quit,
                   self.a_new_files, self.a_combine, self.a_compress,
-                  self.a_undo, self.a_redo, self.a_pg_rot_l, self.a_pg_rot_r,
+                  self.a_undo, self.a_redo, self.a_copy, self.a_pg_rot_l, self.a_pg_rot_r,
                   self.a_move_up, self.a_move_down,
                   self.a_tool_pan, self.a_tool_select, self.a_tool_text,
-                  self.a_tool_redact, self.a_tool_image, self.a_tool_link,
+                  self.a_tool_redact, self.a_tool_image, self.a_tool_table, self.a_tool_link,
                   self.a_tool_pen, self.a_tool_highlight, self.a_tool_underline,
                   self.a_tool_strikeout, self.a_tool_note,
                   self.a_ocr, self.a_attachments, self.a_fill_forms, self.a_flatten_forms):
@@ -423,6 +427,7 @@ class MainWindow(QMainWindow):
             m.addSeparator()
             m.addAction(self.a_split)
             m.addAction(self.a_crop)
+            m.addAction(self.a_tool_table)
             m.addAction(self.a_expand_table)
             m.addSeparator()
             m.addAction(self.a_watermark)
@@ -524,6 +529,9 @@ class MainWindow(QMainWindow):
         tab.view.highlightRequested.connect(lambda pno, rect, t=tab: self._on_highlight_requested(t, pno, rect))
         tab.view.underlineRequested.connect(lambda pno, rect, t=tab: self._on_underline_requested(t, pno, rect))
         tab.view.strikeoutRequested.connect(lambda pno, rect, t=tab: self._on_strikeout_requested(t, pno, rect))
+        tab.view.tableRowExpandRequested.connect(
+            lambda pno, ys, dy, bbox, cols, t=tab: self._on_table_row_expand_requested(t, pno, ys, dy, bbox, cols)
+        )
         tab.view.linkActivated.connect(self._on_link_activated)
         tab.view.textSelected.connect(lambda txt: self.status_msg.setText(f"Texto seleccionado ({len(txt)} caracteres). Presione Ctrl+C para copiar."))
         tab.view.set_tool(self._current_tool)
@@ -791,6 +799,7 @@ class MainWindow(QMainWindow):
             TOOL_TEXT: self.a_tool_text,
             TOOL_REDACT: self.a_tool_redact,
             TOOL_IMAGE: self.a_tool_image,
+            TOOL_TABLE: self.a_tool_table,
             TOOL_LINK: self.a_tool_link,
             TOOL_PEN: self.a_tool_pen,
             TOOL_HIGHLIGHT: self.a_tool_highlight,
@@ -820,6 +829,43 @@ class MainWindow(QMainWindow):
         act = action_map.get(tool)
         if act and not act.isChecked():
             act.setChecked(True)
+        if tool == TOOL_TABLE:
+            self.statusBar().showMessage(
+                "📐 Modo tabla activo: Posá el cursor sobre el borde inferior de una fila y arrastralo hacia abajo para estirarla.",
+                6000,
+            )
+
+    def _copy_current_selection(self):
+        tab = self.current_tab()
+        if tab and hasattr(tab, "view") and tab.view:
+            v = tab.view
+            if v._selected_text:
+                v._copy_selection()
+                snippet = v._selected_text.strip().replace("\n", " ")
+                if len(snippet) > 25:
+                    snippet = snippet[:25] + "…"
+                self.statusBar().showMessage(f"📋 Copiado al portapapeles: «{snippet}»", 3000)
+            else:
+                self.statusBar().showMessage("No hay texto seleccionado para copiar.", 2000)
+
+    def _on_table_row_expand_requested(self, tab: DocTab, pno: int, y_split: float, delta_y: float, bbox, cols):
+        self._edit(
+            tab,
+            lambda d: ops.expand_table_row(
+                d,
+                pno,
+                y_split,
+                delta_y,
+                table_bbox=bbox,
+                column_xs=cols,
+                extend_borders=True,
+                expand_page=True,
+            ),
+            f"Fila ampliada en página {pno + 1} (+{delta_y:.0f} pt)",
+            select=[pno],
+            goto=pno,
+        )
+        self.statusBar().showMessage(f"📐 Fila ampliada con éxito (+{delta_y:.0f} pt) — Deshacer con Ctrl+Z", 4000)
 
     def _on_text_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
         # 1. Buscar si se hizo clic o seleccionó un bloque/tarjeta de texto existente

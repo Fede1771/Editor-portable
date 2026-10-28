@@ -6,7 +6,7 @@ import math
 
 import pymupdf as fitz
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap, QKeySequence
+from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixmap, QKeySequence
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu, QToolTip
 
 from .selection_popup import TextSelectionPopup
@@ -133,6 +133,7 @@ TOOL_NOTE = "note"
 TOOL_HIGHLIGHT = "highlight"
 TOOL_UNDERLINE = "underline"
 TOOL_STRIKEOUT = "strikeout"
+TOOL_TABLE = "table"
 
 
 class PdfView(QAbstractScrollArea):
@@ -153,6 +154,7 @@ class PdfView(QAbstractScrollArea):
     highlightRequested = Signal(int, object) # (page_idx, fitz.Rect)
     underlineRequested = Signal(int, object) # (page_idx, fitz.Rect)
     strikeoutRequested = Signal(int, object) # (page_idx, fitz.Rect)
+    tableRowExpandRequested = Signal(int, float, float, object, object)  # (page_idx, y_split, delta_y, table_bbox, column_xs)
     textSelected = Signal(str)               # Texto seleccionado copiado
     searchRequested = Signal(str)            # Solicitar búsqueda de texto
     linkActivated = Signal(str, str)         # (uri, visible_text) enlace externo clickeado
@@ -200,10 +202,21 @@ class PdfView(QAbstractScrollArea):
         self._words_cache: dict[int, list] = {}
         self._links_cache: dict[int, list[dict]] = {}
         self._last_selection_target: tuple[int, fitz.Rect] | None = None
+        self._tables_cache: dict[int, list[dict]] = {}
+        self._hover_table_info = None  # (pno, table_data, row_data, y_split, is_on_splitter)
+        self._table_drag_active = False
+        self._table_drag_page = -1
+        self._table_drag_table = None
+        self._table_drag_y_split = 0.0
+        self._table_drag_start_y = 0.0
+        self._table_drag_current_y = 0.0
 
         self._last_click_time = 0.0
         self._last_click_pos = QPointF()
         self._click_count = 0
+
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.viewport().setFocusPolicy(Qt.StrongFocus)
 
         self.popup = TextSelectionPopup(self.viewport())
         self.popup.copyRequested.connect(self._copy_selection)
@@ -255,6 +268,8 @@ class PdfView(QAbstractScrollArea):
             self._tool = tool
             self._dragging = False
             self._hover_block = None
+            self._hover_table_info = None
+            self._table_drag_active = False
             self._selection_line_rects.clear()
             self._selection_page = -1
             self._selected_text = ""
@@ -301,6 +316,8 @@ class PdfView(QAbstractScrollArea):
             self.viewport().setCursor(QCursor(Qt.IBeamCursor))
         elif self._tool == TOOL_NOTE:
             self.viewport().setCursor(QCursor(Qt.PointingHandCursor))
+        elif self._tool == TOOL_TABLE:
+            self.viewport().setCursor(QCursor(Qt.SizeVerCursor))
         else:
             self.viewport().setCursor(QCursor(Qt.CrossCursor))
 
@@ -386,6 +403,9 @@ class PdfView(QAbstractScrollArea):
         self._cache_bytes = 0
         self._annots_cache.clear()
         self._blocks_cache.clear()
+        self._tables_cache.clear()
+        self._hover_table_info = None
+        self._table_drag_active = False
         self._words_cache.clear()
         self._links_cache.clear()
         self._hits.clear()
@@ -895,6 +915,77 @@ class PdfView(QAbstractScrollArea):
                 p2 = self._map_point(self._pen_page, fitz.Point(self._pen_stroke[i + 1])) + target_page.topLeft()
                 painter.drawLine(p1, p2)
 
+        # Visualización interactiva para herramienta de tabla (TOOL_TABLE)
+        if self._tool == TOOL_TABLE and self._hover_table_info is not None:
+            pno, t, r, y_split, is_on_splitter = self._hover_table_info
+            if pno in self._page_rects:
+                target_page = self._page_rects[pno].translated(dx, dy)
+                p_w = self._sizes[pno][0]
+                x0 = t["bbox"][0] if t else 30.0
+                x1 = t["bbox"][2] if t else (p_w - 30.0)
+
+                # Resaltar la tabla detectada suavemente
+                if t is not None:
+                    tb = fitz.Rect(t["bbox"])
+                    v_tb = self._map_rect(pno, tb).translated(target_page.topLeft())
+                    painter.fillRect(v_tb, QColor(99, 102, 241, 15))
+                    painter.setPen(QPen(QColor(99, 102, 241, 80), 1, Qt.DashLine))
+                    painter.drawRect(v_tb)
+
+                # Resaltar la fila detectada
+                if r is not None:
+                    rb = fitz.Rect(r["bbox"])
+                    v_rb = self._map_rect(pno, rb).translated(target_page.topLeft())
+                    painter.fillRect(v_rb, QColor(99, 102, 241, 35))
+
+                split_rect = fitz.Rect(x0, y_split - 1.0, x1, y_split + 1.0)
+                v_split = self._map_rect(pno, split_rect).translated(target_page.topLeft())
+
+                if self._table_drag_active:
+                    # Zona elástica expandida (verde esmeralda translúcido)
+                    delta_y = max(0.0, self._table_drag_current_y - self._table_drag_start_y)
+                    if delta_y > 0:
+                        exp_rect = fitz.Rect(x0, y_split, x1, y_split + delta_y)
+                        v_exp = self._map_rect(pno, exp_rect).translated(target_page.topLeft())
+                        painter.fillRect(v_exp, QColor(16, 185, 129, 45))
+                        painter.setPen(QPen(QColor(16, 185, 129, 180), 1, Qt.DashLine))
+                        painter.drawRect(v_exp)
+
+                        # Líneas guía verticales de columnas si existen
+                        if t and t.get("column_xs"):
+                            painter.setPen(QPen(QColor(16, 185, 129, 140), 1, Qt.DotLine))
+                            for col_x in t["column_xs"]:
+                                if x0 <= col_x <= x1:
+                                    cr = fitz.Rect(col_x, y_split, col_x, y_split + delta_y)
+                                    v_cr = self._map_rect(pno, cr).translated(target_page.topLeft())
+                                    painter.drawLine(int(v_cr.left()), int(v_cr.top()), int(v_cr.left()), int(v_cr.bottom()))
+
+                    # Línea de origen (corte inicial)
+                    painter.setPen(QPen(QColor(100, 116, 139, 180), 1, Qt.DashLine))
+                    painter.drawLine(int(v_split.left()), int(v_split.center().y()), int(v_split.right()), int(v_split.center().y()))
+
+                    # Línea elástica arrastrada
+                    drag_rect = fitz.Rect(x0, self._table_drag_current_y - 1.5, x1, self._table_drag_current_y + 1.5)
+                    v_drag = self._map_rect(pno, drag_rect).translated(target_page.topLeft())
+                    painter.setPen(QPen(QColor(16, 185, 129), 2, Qt.SolidLine))
+                    painter.drawLine(int(v_drag.left()), int(v_drag.center().y()), int(v_drag.right()), int(v_drag.center().y()))
+
+                    # Puntos de control en extremos y centro
+                    mid_x = (v_drag.left() + v_drag.right()) / 2
+                    painter.setBrush(QBrush(QColor(16, 185, 129)))
+                    painter.drawEllipse(QPointF(mid_x, v_drag.center().y()), 4, 4)
+                    painter.drawEllipse(QPointF(v_drag.left(), v_drag.center().y()), 3, 3)
+                    painter.drawEllipse(QPointF(v_drag.right(), v_drag.center().y()), 3, 3)
+                else:
+                    # Línea en reposo / hover
+                    col = QColor(99, 102, 241) if is_on_splitter else QColor(99, 102, 241, 160)
+                    painter.setPen(QPen(col, 2 if is_on_splitter else 1, Qt.SolidLine if is_on_splitter else Qt.DashLine))
+                    painter.drawLine(int(v_split.left()), int(v_split.center().y()), int(v_split.right()), int(v_split.center().y()))
+                    if is_on_splitter:
+                        mid_x = (v_split.left() + v_split.right()) / 2
+                        painter.setBrush(QBrush(col))
+                        painter.drawEllipse(QPointF(mid_x, v_split.center().y()), 3.5, 3.5)
+
         painter.end()
 
     # ---------------------------------------------------------------- eventos
@@ -968,8 +1059,25 @@ class PdfView(QAbstractScrollArea):
                     event.accept()
                     return
 
+        self.setFocus()
         if event.button() == Qt.LeftButton:
-            if self._tool == TOOL_PAN:
+            if self._tool == TOOL_TABLE:
+                pno, pt = self.viewport_to_page_point(event.position())
+                if pno is not None and pt is not None:
+                    if self._hover_table_info and self._hover_table_info[0] == pno:
+                        hpno, t, r, y_split, is_on_splitter = self._hover_table_info
+                    else:
+                        hpno, t, r, y_split, is_on_splitter = pno, None, None, pt.y, True
+                    self._table_drag_active = True
+                    self._table_drag_page = hpno
+                    self._table_drag_table = t
+                    self._table_drag_y_split = y_split
+                    self._table_drag_start_y = y_split
+                    self._table_drag_current_y = y_split
+                    self.viewport().update()
+                    event.accept()
+                    return
+            elif self._tool == TOOL_PAN:
                 self._panning = True
                 self._pan_start = event.position()
                 self._pan_last = event.position()
@@ -1022,7 +1130,20 @@ class PdfView(QAbstractScrollArea):
         super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._panning:
+        if self._table_drag_active:
+            pno, pt = self.viewport_to_page_point(event.position())
+            if pt is not None:
+                self._table_drag_current_y = max(self._table_drag_start_y, pt.y)
+                delta_y = self._table_drag_current_y - self._table_drag_start_y
+                QToolTip.showText(
+                    event.globalPosition().toPoint(),
+                    f"📐 +{delta_y:.0f} pt (soltá para ampliar fila)",
+                    self.viewport(),
+                )
+                self.viewport().update()
+            event.accept()
+            return
+        elif self._panning:
             delta = event.position() - self._pan_last
             self._pan_last = event.position()
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
@@ -1136,6 +1257,45 @@ class PdfView(QAbstractScrollArea):
                     else:
                         self.viewport().setCursor(QCursor(Qt.CrossCursor))
                     self.viewport().update()
+
+            if self._tool == TOOL_TABLE:
+                new_table_hover = None
+                if pno is not None and pt is not None:
+                    if pno not in self._tables_cache:
+                        try:
+                            from . import operations as ops
+                            self._tables_cache[pno] = ops.detect_tables_on_page(self.doc[pno])
+                        except Exception:
+                            self._tables_cache[pno] = []
+                    tables = self._tables_cache.get(pno, [])
+                    for t in tables:
+                        tb = fitz.Rect(t["bbox"])
+                        exp_tb = fitz.Rect(tb.x0 - 10, tb.y0 - 10, tb.x1 + 10, tb.y1 + 10)
+                        if exp_tb.contains(pt):
+                            on_split = False
+                            for r in t["rows"]:
+                                ys = r["y_split"]
+                                if abs(pt.y - ys) <= 7.0 and (tb.x0 - 20 <= pt.x <= tb.x1 + 20):
+                                    new_table_hover = (pno, t, r, ys, True)
+                                    on_split = True
+                                    break
+                            if not on_split:
+                                for r in t["rows"]:
+                                    rb = fitz.Rect(r["bbox"])
+                                    if rb.contains(pt):
+                                        new_table_hover = (pno, t, r, r["y_split"], False)
+                                        break
+                            if new_table_hover:
+                                break
+
+                    if new_table_hover is None:
+                        new_table_hover = (pno, None, None, pt.y, True)
+
+                if new_table_hover != self._hover_table_info:
+                    self._hover_table_info = new_table_hover
+                    self.viewport().update()
+
+                self.viewport().setCursor(QCursor(Qt.SizeVerCursor))
         super().mouseMoveEvent(event)
 
     def _check_link_at(self, pno: int, pt: fitz.Point) -> bool:
@@ -1164,7 +1324,21 @@ class PdfView(QAbstractScrollArea):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if self._panning:
+            if self._table_drag_active:
+                self._table_drag_active = False
+                QToolTip.hideText()
+                delta_y = max(0.0, self._table_drag_current_y - self._table_drag_start_y)
+                pno = self._table_drag_page
+                y_split = self._table_drag_y_split
+                t = self._table_drag_table
+                table_bbox = t["bbox"] if t else None
+                column_xs = t.get("column_xs") if t else None
+                self.viewport().update()
+                if delta_y >= 5.0 and 0 <= pno < self.page_count:
+                    self.tableRowExpandRequested.emit(pno, y_split, delta_y, table_bbox, column_xs)
+                event.accept()
+                return
+            elif self._panning:
                 self._panning = False
                 self.viewport().setCursor(QCursor(Qt.OpenHandCursor))
                 dist = (self._pan_start - event.position()).manhattanLength()
