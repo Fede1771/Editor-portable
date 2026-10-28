@@ -272,3 +272,153 @@ def add_background(doc: fitz.Document, pages: list[int], color: tuple) -> None:
         page = doc[p]
         rect = (page.rect * page.derotation_matrix).normalize()
         page.draw_rect(rect, color=None, fill=color, overlay=False)
+
+
+# ---------------------------------------------------- grillas / tablas
+def detect_tables_on_page(page: fitz.Page) -> list[dict]:
+    """Detecta tablas en una página usando PyMuPDF y extrae metadata de filas y columnas."""
+    try:
+        tabs = page.find_tables()
+    except Exception:
+        return []
+    if not tabs or not tabs.tables:
+        return []
+    tables_data: list[dict] = []
+    for t_idx, t in enumerate(tabs.tables):
+        rows_data: list[dict] = []
+        col_xs: set[float] = {round(t.bbox[0], 1), round(t.bbox[2], 1)}
+
+        extracted: list[list[str]] = []
+        try:
+            extracted = t.extract()
+        except Exception:
+            extracted = []
+
+        for r_idx, r in enumerate(t.rows):
+            y_split = round(r.bbox[3], 1)
+            if hasattr(r, "cells"):
+                for cell in r.cells:
+                    if cell:
+                        col_xs.add(round(cell[0], 1))
+                        col_xs.add(round(cell[2], 1))
+            preview_cells: list[str] = []
+            if r_idx < len(extracted):
+                preview_cells = [str(c or "").strip() for c in extracted[r_idx] if str(c or "").strip()]
+            preview = " | ".join(preview_cells[:3])
+            if len(preview_cells) > 3:
+                preview += "..."
+            if not preview:
+                preview = f"Fila {r_idx + 1}"
+            rows_data.append({
+                "row_index": r_idx,
+                "bbox": (round(r.bbox[0], 1), round(r.bbox[1], 1), round(r.bbox[2], 1), round(r.bbox[3], 1)),
+                "y_split": y_split,
+                "preview": preview,
+            })
+
+        sorted_xs = sorted(col_xs)
+        cleaned_xs = [sorted_xs[0]] if sorted_xs else []
+        for x in sorted_xs[1:]:
+            if abs(x - cleaned_xs[-1]) > 2.0:
+                cleaned_xs.append(x)
+
+        tables_data.append({
+            "index": t_idx,
+            "bbox": (round(t.bbox[0], 1), round(t.bbox[1], 1), round(t.bbox[2], 1), round(t.bbox[3], 1)),
+            "row_count": t.row_count,
+            "col_count": t.col_count,
+            "rows": rows_data,
+            "column_xs": cleaned_xs,
+        })
+    return tables_data
+
+
+def expand_table_row(
+    doc: fitz.Document,
+    page_num: int,
+    y_split: float,
+    delta_y: float,
+    *,
+    table_bbox: tuple[float, float, float, float] | None = None,
+    column_xs: list[float] | None = None,
+    extend_borders: bool = True,
+    expand_page: bool = True,
+    border_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    border_width: float = 1.0,
+) -> None:
+    """Amplía el alto de una fila o grilla en una página PDF desplazando el contenido inferior.
+
+    Corta la página en la coordenada vertical `y_split`:
+    - El contenido por encima de `y_split` permanece intacto.
+    - Se inserta un espacio vertical de `delta_y` puntos.
+    - Todo el contenido por debajo de `y_split` se desplaza hacia abajo `delta_y` puntos.
+    - Si `extend_borders` es True, extiende las líneas verticales y añade el borde horizontal inferior.
+    - Si `expand_page` es True, la altura de la página se amplía en `delta_y` para no perder margen inferior.
+    """
+    if not (0 <= page_num < doc.page_count):
+        raise IndexError(f"Índice de página fuera de rango: {page_num + 1} de {doc.page_count}")
+    if delta_y <= 0:
+        raise ValueError("El incremento de altura debe ser mayor a 0 puntos.")
+
+    page = doc[page_num]
+    rect = page.rect
+    w, h = rect.width, rect.height
+
+    if not (0 < y_split < h):
+        raise ValueError(f"La línea de corte ({y_split:.1f} pt) debe estar dentro de la altura de la página (0..{h:.1f} pt).")
+
+    new_h = h + delta_y if expand_page else h
+    links = page.get_links()
+
+    temp_doc = fitz.open()
+    try:
+        temp_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
+
+        new_page = doc.new_page(pno=page_num + 1, width=w, height=new_h)
+
+        # Slice superior: desde 0 hasta y_split
+        top_clip = fitz.Rect(0, 0, w, y_split)
+        new_page.show_pdf_page(top_clip, temp_doc, 0, clip=top_clip)
+
+        # Slice inferior: desde y_split hacia abajo, desplazado en delta_y
+        bottom_source_h = h if expand_page else max(y_split, h - delta_y)
+        bottom_source = fitz.Rect(0, y_split, w, bottom_source_h)
+        bottom_target = fitz.Rect(0, y_split + delta_y, w, h + delta_y if expand_page else h)
+        new_page.show_pdf_page(bottom_target, temp_doc, 0, clip=bottom_source)
+
+        # Extensión de bordes vectoriales de la tabla en el nuevo espacio
+        if extend_borders:
+            xs: set[float] = set(column_xs or [])
+            if table_bbox:
+                xs.add(table_bbox[0])
+                xs.add(table_bbox[2])
+            if xs:
+                sorted_xs = sorted(xs)
+                cleaned_xs = [sorted_xs[0]]
+                for x in sorted_xs[1:]:
+                    if abs(x - cleaned_xs[-1]) > 1.5:
+                        cleaned_xs.append(x)
+
+                shape = new_page.new_shape()
+                for x in cleaned_xs:
+                    shape.draw_line(fitz.Point(x, y_split), fitz.Point(x, y_split + delta_y))
+                min_x = cleaned_xs[0]
+                max_x = cleaned_xs[-1]
+                shape.draw_line(fitz.Point(min_x, y_split + delta_y), fitz.Point(max_x, y_split + delta_y))
+                shape.finish(color=border_color, width=border_width)
+                shape.commit()
+
+        # Desplazamiento de enlaces
+        for l in links:
+            l_copy = dict(l)
+            r = fitz.Rect(l.get("from", [0, 0, 0, 0]))
+            if r.y0 >= y_split:
+                l_copy["from"] = fitz.Rect(r.x0, r.y0 + delta_y, r.x1, r.y1 + delta_y)
+                new_page.insert_link(l_copy)
+            elif r.y1 <= y_split:
+                new_page.insert_link(l_copy)
+
+        doc.delete_page(page_num)
+    finally:
+        temp_doc.close()
+

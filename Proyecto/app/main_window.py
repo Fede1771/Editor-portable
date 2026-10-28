@@ -26,7 +26,7 @@ from . import forms as forms_mod
 from .background import run_blocking, run_pdf_job
 from .dialogs import (
     AddLinkDialog, AddNoteDialog, AddTextDialog, CombineDialog, CompressPdfDialog,
-    ConvertImagesDialog, CropDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog,
+    ConvertImagesDialog, CropDialog, ExpandTableDialog, FillFormsDialog, FindRedactDialog, HeaderFooterDialog,
     OcrDialog, OptimizeDialog, SplitDialog, TextEditDialog, WatermarkDialog,
 )
 from .doc_tab import DocTab
@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         self.a_move_down = self._act("Mover páginas hacia abajo", lambda: self.move_pages(1), "Alt+Down")
         self.a_split = self._act("Dividir documento…", self.split_document)
         self.a_crop = self._act("Recortar páginas…", self.crop_pages)
+        self.a_expand_table = self._act("📐 Ampliar fila / grilla de tabla…", self.expand_table_row, None, "Ampliar el alto de una fila desplazando el contenido inferior")
         self.a_watermark = self._act("Marca de agua…", self.watermark)
         self.a_background = self._act("Color de fondo…", self.background)
         self.a_header = self._act("Encabezado, pie y numeración…", self.header_footer)
@@ -212,7 +213,7 @@ class MainWindow(QMainWindow):
         self.page_actions = [
             self.a_insert, self.a_blank, self.a_replace, self.a_extract, self.a_delete, self.a_dup,
             self.a_pg_rot_l, self.a_pg_rot_r, self.a_move_up, self.a_move_down, self.a_split,
-            self.a_crop, self.a_watermark, self.a_background, self.a_header,
+            self.a_crop, self.a_expand_table, self.a_watermark, self.a_background, self.a_header,
         ]
 
     def _build_toolbar(self):
@@ -357,6 +358,8 @@ class MainWindow(QMainWindow):
         sub_tools.addAction(self.a_flatten_forms)
         sub_tools.addAction(self.a_attachments)
         sub_tools.addSeparator()
+        sub_tools.addAction(self.a_expand_table)
+        sub_tools.addSeparator()
         sub_tools.addAction(self.a_find_redact)
         sub_tools.addAction(self.a_extract_imgs)
 
@@ -420,6 +423,7 @@ class MainWindow(QMainWindow):
             m.addSeparator()
             m.addAction(self.a_split)
             m.addAction(self.a_crop)
+            m.addAction(self.a_expand_table)
             m.addSeparator()
             m.addAction(self.a_watermark)
             m.addAction(self.a_background)
@@ -1534,6 +1538,45 @@ class MainWindow(QMainWindow):
         m = dlg.margins_pt()
         self._edit(tab, lambda d: ops.crop_pages(d, pages, m["left"], m["top"], m["right"], m["bottom"]),
                    f"Recortadas {self._label(pages)}", goto=tab.view.current_page)
+
+    def expand_table_row(self):
+        tab = self.current_tab()
+        if not tab:
+            return
+        sel = tab.selected_pages()
+        pno = sel[0] if sel else tab.view.current_page
+        pno = min(max(0, pno), tab.doc.page_count - 1)
+        page = tab.doc[pno]
+
+        # Si hay selección activa en el visor, tomar su cota inferior como punto inicial sugerido
+        default_y = None
+        v = tab.view
+        if getattr(v, "_selection_line_rects", None) and getattr(v, "_selection_page", -1) == pno:
+            default_y = max(r.y1 for r in v._selection_line_rects)
+        elif getattr(v, "_last_selection_target", None) and v._last_selection_target[0] == pno:
+            default_y = v._last_selection_target[1].y1
+
+        dlg = ExpandTableDialog(page, pno, default_y=default_y, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        vals = dlg.get_values()
+
+        self._edit(
+            tab,
+            lambda d: ops.expand_table_row(
+                d,
+                vals["page_num"],
+                vals["y_split"],
+                vals["delta_y"],
+                table_bbox=vals["table_bbox"],
+                column_xs=vals["column_xs"],
+                extend_borders=vals["extend_borders"],
+                expand_page=vals["expand_page"],
+            ),
+            f"Fila ampliada en página {vals['page_num'] + 1} (+{vals['delta_y']:.0f} pt)",
+            select=[vals["page_num"]],
+            goto=vals["page_num"],
+        )
 
     def watermark(self):
         tab = self.current_tab()

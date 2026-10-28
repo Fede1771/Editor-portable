@@ -959,3 +959,160 @@ class FillFormsDialog(_BaseDialog):
         return result
 
 
+class ExpandTableDialog(_BaseDialog):
+    """Diálogo para ampliar filas de tablas o grillas con desplazamiento hacia abajo."""
+
+    def __init__(self, page: fitz.Page, page_num: int, default_y: float | None = None, parent=None):
+        super().__init__("Ampliar fila / grilla de tabla", parent)
+        self.setMinimumWidth(480)
+        self.page_num = page_num
+        self.page_h = page.rect.height
+        self.page_w = page.rect.width
+
+        # Detectar tablas automáticamente con PyMuPDF
+        self.tables_data = ops.detect_tables_on_page(page)
+
+        # Encabezado explicativo
+        info_lbl = QLabel(
+            "Amplía el alto de una fila o grilla insertando espacio vertical y desplazando todo "
+            "el contenido inferior hacia abajo para no tapar texto ni gráficos."
+        )
+        info_lbl.setWordWrap(True)
+        info_lbl.setStyleSheet("color: #4A5568; margin-bottom: 6px;")
+        self.outer.insertWidget(0, info_lbl)
+
+        # Selección de modo
+        self.btn_group = QButtonGroup(self)
+        self.r_auto = QRadioButton("Detección inteligente de tabla (PyMuPDF)")
+        self.r_manual = QRadioButton("Corte manual en coordenada vertical Y")
+        self.btn_group.addButton(self.r_auto)
+        self.btn_group.addButton(self.r_manual)
+
+        self.combo_table = QComboBox()
+        self.combo_row = QComboBox()
+        self.lbl_row_info = QLabel()
+        self.lbl_row_info.setStyleSheet("color: #718096; font-size: 8.5pt;")
+
+        self.spin_y = QDoubleSpinBox()
+        self.spin_y.setRange(1.0, max(1.0, self.page_h - 1.0))
+        self.spin_y.setDecimals(1)
+        self.spin_y.setSingleStep(5.0)
+        self.spin_y.setSuffix(" pt")
+
+        # Configurar datos iniciales
+        if self.tables_data:
+            self.r_auto.setChecked(True)
+            for t in self.tables_data:
+                self.combo_table.addItem(
+                    f"Tabla {t['index'] + 1} ({t['col_count']} columnas × {t['row_count']} filas — Y: {t['bbox'][1]:.0f} a {t['bbox'][3]:.0f} pt)",
+                    t,
+                )
+            self.combo_table.currentIndexChanged.connect(self._on_table_changed)
+            self.combo_row.currentIndexChanged.connect(self._on_row_changed)
+            self._on_table_changed(0)
+        else:
+            self.r_auto.setEnabled(False)
+            self.r_auto.setText("Detección inteligente (No se detectaron tablas automáticas)")
+            self.r_manual.setChecked(True)
+            self.combo_table.setEnabled(False)
+            self.combo_row.setEnabled(False)
+            init_y = default_y if default_y is not None else self.page_h / 2
+            self.spin_y.setValue(min(max(1.0, init_y), self.page_h - 1.0))
+
+        if default_y is not None and not self.tables_data:
+            self.spin_y.setValue(min(max(1.0, default_y), self.page_h - 1.0))
+
+        self.r_auto.toggled.connect(self._on_mode_toggled)
+
+        self.form.addRow(self.r_auto)
+        self.form.addRow("  Tabla:", self.combo_table)
+        self.form.addRow("  Fila a ampliar:", self.combo_row)
+        self.form.addRow("", self.lbl_row_info)
+
+        self.form.addRow(self.r_manual)
+        self.form.addRow("  Posición Y de corte:", self.spin_y)
+
+        # Altura adicional
+        self.spin_delta = QDoubleSpinBox()
+        self.spin_delta.setRange(5.0, 600.0)
+        self.spin_delta.setDecimals(1)
+        self.spin_delta.setSingleStep(5.0)
+        self.spin_delta.setValue(30.0)
+        self.spin_delta.setSuffix(" pt")
+        self.form.addRow("Espacio a añadir (altura):", self.spin_delta)
+
+        # Opciones
+        self.chk_borders = QCheckBox("Extender líneas verticales y bordes de la tabla en el espacio nuevo")
+        self.chk_borders.setChecked(True)
+        self.chk_expand_page = QCheckBox("Ampliar alto total de la página (evita perder margen o pie de página)")
+        self.chk_expand_page.setChecked(True)
+
+        self.outer.addWidget(self.chk_borders)
+        self.outer.addWidget(self.chk_expand_page)
+
+        self.finish()
+        self._on_mode_toggled(self.r_auto.isChecked())
+
+    def _on_table_changed(self, index: int):
+        self.combo_row.clear()
+        if 0 <= index < len(self.tables_data):
+            t = self.tables_data[index]
+            for r in t["rows"]:
+                self.combo_row.addItem(
+                    f"Fila {r['row_index'] + 1} (Y={r['y_split']:.1f} pt): {r['preview']}",
+                    r,
+                )
+            if t["rows"]:
+                self._on_row_changed(0)
+
+    def _on_row_changed(self, index: int):
+        table_idx = self.combo_table.currentIndex()
+        if 0 <= table_idx < len(self.tables_data):
+            t = self.tables_data[table_idx]
+            if 0 <= index < len(t["rows"]):
+                r = t["rows"][index]
+                self.spin_y.setValue(r["y_split"])
+                self.lbl_row_info.setText(
+                    f"Borde inferior de fila: {r['y_split']:.1f} pt | Ancho de tabla: {t['bbox'][0]:.1f} a {t['bbox'][2]:.1f} pt"
+                )
+
+    def _on_mode_toggled(self, auto_checked: bool):
+        has_tables = bool(self.tables_data)
+        self.combo_table.setEnabled(auto_checked and has_tables)
+        self.combo_row.setEnabled(auto_checked and has_tables)
+        self.lbl_row_info.setEnabled(auto_checked and has_tables)
+        self.spin_y.setEnabled(not auto_checked or not has_tables)
+
+    def _validate(self) -> bool:
+        if self.spin_delta.value() <= 0:
+            raise ValueError("El incremento de altura debe ser mayor a 0 pt.")
+        y = self.spin_y.value()
+        if not (0 < y < self.page_h):
+            raise ValueError(f"La coordenada Y ({y:.1f} pt) debe estar dentro de la página (0 a {self.page_h:.1f} pt).")
+        return True
+
+    def get_values(self) -> dict[str, object]:
+        is_auto = self.r_auto.isChecked() and bool(self.tables_data)
+        table_bbox = None
+        column_xs = None
+        if is_auto:
+            t = self.tables_data[self.combo_table.currentIndex()]
+            r = t["rows"][self.combo_row.currentIndex()]
+            y_split = r["y_split"]
+            table_bbox = t["bbox"]
+            column_xs = t["column_xs"]
+        else:
+            y_split = self.spin_y.value()
+
+        return {
+            "page_num": self.page_num,
+            "y_split": y_split,
+            "delta_y": self.spin_delta.value(),
+            "table_bbox": table_bbox,
+            "column_xs": column_xs,
+            "extend_borders": self.chk_borders.isChecked(),
+            "expand_page": self.chk_expand_page.isChecked(),
+        }
+
+
+

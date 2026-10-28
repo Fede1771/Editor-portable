@@ -30,6 +30,7 @@
 
 ### ✂️ Organización y maquetación de páginas
 - **Gestión integral:** Combiná varios documentos, dividí PDFs, reordená páginas con arrastrar y soltar, rotá, duplicá o eliminá.
+- **Ampliación inteligente de filas y grillas:** Detectá tablas y filas automáticamente (con PyMuPDF) o definí un corte horizontal personalizado para ampliar el alto de cualquier fila; todo el contenido inferior se desplaza elásticamente hacia abajo sin tapar ni superponer información, extendiendo los bordes de la grilla.
 - **Herramientas de página:** Insertá páginas en blanco en cualquier posición o extraé páginas seleccionadas a un archivo PDF nuevo.
 - **Diseño y membrete:** Agregá numeración de página automática, encabezados, pies de página y marcas de agua personalizadas.
 
