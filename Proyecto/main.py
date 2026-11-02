@@ -67,13 +67,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+    if len(sys.argv) == 3 and sys.argv[1] in {"--self-test", "--self-test-office"}:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         os.environ["PYINSTALLER_SUPPRESS_SPLASH_SCREEN"] = "1"
         try:
             pyi_splash.close()
         except (NameError, RuntimeError):
             pass
-        from app.diagnostics import self_test
-        sys.exit(self_test(sys.argv[2]))
+        from app.diagnostics import self_test, office_self_test
+        check = office_self_test if sys.argv[1] == "--self-test-office" else self_test
+        sys.exit(check(sys.argv[2]))
     sys.exit(main())

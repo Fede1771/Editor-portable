@@ -19,6 +19,56 @@ class OfficeConversionError(RuntimeError):
 _APPS = {"word_pdf": "Word", "excel_pdf": "Excel", "powerpoint_pdf": "PowerPoint"}
 
 
+def _word_documents(app):
+    """Resolver Documents sin depender sólo del mapa de tipos de pywin32.
+
+    Un AttributeError del wrapper puede ocultar un servidor COM ocupado durante
+    el arranque. Consultar la misma instancia con IDispatch preserva el HRESULT
+    real; nunca conectar a la sesión activa ni regenerar cachés compartidas.
+    """
+    import pythoncom
+    import win32com.client
+    retryable = {-2147418111, -2147417846, -2147417845}  # llamadas rechazadas/ocupadas
+    for attempt in range(8):
+        try:
+            try:
+                return app.Documents
+            except AttributeError:
+                raw = app._oleobj_
+                dispid = raw.GetIDsOfNames(0, "Documents")
+                value = raw.Invoke(dispid, 0, pythoncom.DISPATCH_PROPERTYGET, True)
+                return win32com.client.Dispatch(value, "Word.Documents")
+        except pythoncom.com_error as exc:
+            if exc.hresult not in retryable or attempt == 7:
+                raise
+            pythoncom.PumpWaitingMessages()
+            time.sleep(.25)
+
+
+def _stage(conn, text):
+    if conn is not None:
+        conn.send(("stage", text))
+
+
+def _error_message(name, exc, stage):
+    detail = str(exc)
+    code = getattr(exc, "hresult", None)
+    hint = ""
+    if name == "Word" and (isinstance(exc, AttributeError) and "Documents" in detail
+                           or code in {-2147352570, -2147319779, -2147312566}):
+        hint = (
+            "No se pudo acceder a la automatización de documentos de Word. "
+            "Abrí Word manualmente y verificá su activación y avisos pendientes. "
+            "Si persiste en este equipo, pedí a soporte que revise o repare "
+            "la instalación y el registro COM de Office; no hace falta modificar el documento. "
+        )
+    elif code in {-2147221164, -2147221005}:
+        hint = f"Se necesita {name} de escritorio instalado y activado; la versión web no alcanza. "
+    elif code == -2147024891:
+        hint = "Acceso denegado por Windows u Office. Revisá permisos y políticas del equipo con soporte. "
+    return f"Microsoft 365 ({name}) — {stage}: {hint}Detalle técnico: {detail}"
+
+
 @contextmanager
 def _office_lock(name, timeout):
     """Serializar trabajos de cada aplicación entre instancias del editor."""
@@ -64,7 +114,8 @@ def _stop_owned(identity):
         except psutil.TimeoutExpired:
             process.kill()
             process.wait(timeout=3)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+        # La limpieza no debe ocultar el error original de conversión.
         pass
 
 
@@ -80,6 +131,7 @@ def _run_office(operation: str, source: str, target: str, timeout: float = 240):
                               args=(send, operation, source, target, is_private_mode()))
     owned = None
     packet = None
+    stage = "iniciar el proceso de conversión"
     try:
         process.start()
         send.close()
@@ -92,6 +144,8 @@ def _run_office(operation: str, source: str, target: str, timeout: float = 240):
                     break
                 if kind == "owned":
                     owned = value
+                elif kind == "stage":
+                    stage = value
                 else:
                     packet = kind, value
                     break
@@ -99,7 +153,7 @@ def _run_office(operation: str, source: str, target: str, timeout: float = 240):
                 break
         if packet is None:
             raise OfficeConversionError(
-                f"{_APPS[operation]} no completó la conversión. Puede haber un aviso, "
+                f"{_APPS[operation]} no completó la conversión durante «{stage}». Puede haber un aviso, "
                 "un archivo protegido o un bloqueo de Office. Revisá la instalación y reintentá."
             )
         if packet[0] == "error":
@@ -140,7 +194,8 @@ def _application(name, conn):
                 raise OfficeConversionError("No se pudo aislar una instancia de PowerPoint sin presentaciones del usuario.")
             pid = candidates[0].pid
         elif name == "Word":
-            blank = app.Documents.Add(Visible=False)
+            _stage(conn, "acceder a los documentos de Word")
+            blank = _word_documents(app).Add(Visible=False)
             hwnd = blank.Windows(1).Hwnd
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             blank.Close(0)
@@ -155,6 +210,7 @@ def _application(name, conn):
         owned = True
         p = psutil.Process(pid)
         conn.send(("owned", {"pid": pid, "created": p.create_time(), "name": p.name().lower()}))
+        _stage(conn, "configurar la instancia aislada de Office")
         for key, value in {"AutomationSecurity": 3, "DisplayAlerts": 0 if name == "Word" else (1 if name == "PowerPoint" else False)}.items():
             options[key] = getattr(app, key)
             setattr(app, key, value)
@@ -171,8 +227,8 @@ def _application(name, conn):
         yield app
     finally:
         if app is not None and owned:
-            collection = app.Documents if name == "Word" else (app.Workbooks if name == "Excel" else app.Presentations)
             with suppress(Exception):
+                collection = _word_documents(app) if name == "Word" else (app.Workbooks if name == "Excel" else app.Presentations)
                 for i in range(collection.Count, 0, -1):
                     document = collection(i)
                     if name == "PowerPoint":
@@ -193,12 +249,14 @@ def _application(name, conn):
         pythoncom.CoUninitialize()
 
 
-def _perform(app, operation, source, target, private):
+def _perform(app, operation, source, target, private, conn=None):
     password = "EditorPDF-" + os.urandom(16).hex()
+    _stage(conn, "abrir el documento de origen")
     if operation == "word_pdf":
-        document = app.Documents.Open(source, ConfirmConversions=False, ReadOnly=True,
+        document = _word_documents(app).Open(source, ConfirmConversions=False, ReadOnly=True,
                                       AddToRecentFiles=False, Visible=False, NoEncodingDialog=True,
                                       PasswordDocument=password, WritePasswordDocument=password)
+        _stage(conn, "exportar Word a PDF")
         document.ExportAsFixedFormat(target, 17, OpenAfterExport=False)
         return None
     if operation == "excel_pdf":
@@ -206,21 +264,34 @@ def _perform(app, operation, source, target, private):
         app.Calculation = -4135
         document = app.Workbooks.Open(source, UpdateLinks=0, ReadOnly=True, AddToMru=False,
                                       IgnoreReadOnlyRecommended=True, Password=password, WriteResPassword=password)
+        _stage(conn, "exportar Excel a PDF")
         document.ExportAsFixedFormat(0, target, OpenAfterPublish=False)
         return None
     if operation == "powerpoint_pdf":
         document = app.Presentations.Open(source, ReadOnly=True, Untitled=False, WithWindow=False)
+        _stage(conn, "exportar PowerPoint a PDF")
         document.SaveAs(target, 32)
         return None
     raise ValueError(f"Operación de Microsoft 365 desconocida: {operation}")
 
 
 def _office_process(conn, operation, source, target, private):
+    stage = "iniciar Office"
+    # Conservar la última etapa para describir errores tanto de COM como de cierre.
+    class Reporter:
+        def send(self, packet):
+            nonlocal stage
+            if packet[0] == "stage":
+                stage = packet[1]
+            conn.send(packet)
+    reporter = Reporter()
     try:
-        with _application(_APPS[operation], conn) as app:
-            result = _perform(app, operation, source, target, private)
+        _stage(reporter, stage)
+        with _application(_APPS[operation], reporter) as app:
+            result = _perform(app, operation, source, target, private, reporter)
+            _stage(reporter, "cerrar la instancia de Office")
         conn.send(("result", result))
     except Exception as exc:
-        conn.send(("error", f"Microsoft 365 ({_APPS[operation]}): {exc}"))
+        conn.send(("error", _error_message(_APPS[operation], exc, stage)))
     finally:
         conn.close()

@@ -1,5 +1,6 @@
 """Integración Office: rutas, atomicidad, datos en vivo y límites de proceso."""
 from pathlib import Path
+from contextlib import contextmanager
 import time
 
 import pymupdf as fitz
@@ -51,7 +52,9 @@ def test_m365_timeout_terminates_only_worker(tmp_path, monkeypatch):
     monkeypatch.setattr(office365, "_office_process", _stuck_worker)
     before = time.monotonic()
     with pytest.raises(office365.OfficeConversionError, match="no completó"):
-        office365.run_office("word_pdf", str(source), str(tmp_path / "out.pdf"), timeout=.2)
+        # Probar el timeout del trabajador sin competir con conversiones reales
+        # por el mutex global de Word (el mutex tiene su propia regresión).
+        office365._run_office("word_pdf", str(source), str(tmp_path / "out.pdf"), timeout=.2)
     assert time.monotonic() - before < 8
 
 
@@ -92,3 +95,163 @@ def test_m365_parallel_jobs_cannot_share_application_lock():
     with office365._office_lock(name, 1):
         with ThreadPoolExecutor(max_workers=1) as executor:
             executor.submit(second).result(timeout=3)
+
+
+def test_word_documents_falls_back_to_same_dispatch_without_creating_word(monkeypatch):
+    import pythoncom
+    import win32com.client
+    collection = object()
+    raw_collection = object()
+    class Raw:
+        def GetIDsOfNames(self, locale, name):
+            assert (locale, name) == (0, "Documents")
+            return 6
+        def Invoke(self, dispid, locale, kind, result):
+            assert (dispid, locale, kind, result) == (6, 0, pythoncom.DISPATCH_PROPERTYGET, True)
+            return raw_collection
+    class Word:
+        _oleobj_ = Raw()
+        @property
+        def Documents(self):
+            raise AttributeError("Word.Application.Documents")
+    def wrap(value, name):
+        assert value is raw_collection
+        return collection
+    monkeypatch.setattr(win32com.client, "Dispatch", wrap)
+    monkeypatch.setattr(win32com.client, "DispatchEx", lambda *a: pytest.fail("No iniciar otra sesión"))
+    assert office365._word_documents(Word()) is collection
+
+
+def test_word_documents_retries_busy_startup_but_not_access_denied(monkeypatch):
+    import pythoncom
+    collection = object()
+    class StartingWord:
+        attempts = 0
+        @property
+        def Documents(self):
+            self.attempts += 1
+            if self.attempts < 3:
+                raise pythoncom.com_error(-2147418111, "Call rejected", None, None)
+            return collection
+    monkeypatch.setattr(office365.time, "sleep", lambda seconds: None)
+    word = StartingWord()
+    assert office365._word_documents(word) is collection
+    assert word.attempts == 3
+    class RestrictedWord:
+        @property
+        def Documents(self):
+            raise pythoncom.com_error(-2147024891, "Access denied", None, None)
+    with pytest.raises(pythoncom.com_error) as error:
+        office365._word_documents(RestrictedWord())
+    assert error.value.hresult == -2147024891
+
+
+def test_word_documents_busy_retry_is_bounded(monkeypatch):
+    import pythoncom
+    class Word:
+        attempts = 0
+        @property
+        def Documents(self):
+            self.attempts += 1
+            raise pythoncom.com_error(-2147417846, "Retry later", None, None)
+    monkeypatch.setattr(office365.time, "sleep", lambda seconds: None)
+    word = Word()
+    with pytest.raises(pythoncom.com_error):
+        office365._word_documents(word)
+    assert word.attempts == 8
+
+
+def test_word_export_preserves_read_only_and_progress(tmp_path):
+    source, target = str(tmp_path / "input.docx"), str(tmp_path / "output.pdf")
+    stages = []
+    class Document:
+        def ExportAsFixedFormat(self, path, format_id, **options):
+            assert (path, format_id, options) == (target, 17, {"OpenAfterExport": False})
+    class Documents:
+        def Open(self, path, **options):
+            assert path == source
+            assert options["ReadOnly"] is True
+            assert options["AddToRecentFiles"] is False
+            assert options["Visible"] is False
+            return Document()
+    documents = Documents()
+    class Word:
+        Documents = documents
+    class Connection:
+        def send(self, packet):
+            stages.append(packet)
+    office365._perform(Word(), "word_pdf", source, target, False, Connection())
+    assert stages[-1] == ("stage", "exportar Word a PDF")
+
+
+def test_office_cleanup_timeout_does_not_replace_conversion_error(monkeypatch):
+    class StubbornOwnedProcess:
+        killed = False
+        def create_time(self):
+            return 1
+        def name(self):
+            return "WINWORD.EXE"
+        def wait(self, timeout):
+            raise office365.psutil.TimeoutExpired(timeout, 123)
+        def kill(self):
+            self.killed = True
+    process = StubbornOwnedProcess()
+    monkeypatch.setattr(office365.psutil, "Process", lambda pid: process)
+    with pytest.raises(office365.OfficeConversionError, match="error original"):
+        try:
+            raise office365.OfficeConversionError("error original")
+        finally:
+            office365._stop_owned({"pid": 123, "created": 1, "name": "winword.exe"})
+    assert process.killed
+
+
+def test_office_worker_reports_documents_error_with_stage(monkeypatch):
+    packets = []
+    class Connection:
+        def send(self, packet):
+            packets.append(packet)
+        def close(self):
+            pass
+    @contextmanager
+    def unavailable(name, conn):
+        office365._stage(conn, "acceder a los documentos de Word")
+        raise AttributeError("Word.Application.Documents")
+        yield
+    monkeypatch.setattr(office365, "_application", unavailable)
+    office365._office_process(Connection(), "word_pdf", "a.docx", "a.pdf", False)
+    kind, message = packets[-1]
+    assert kind == "error"
+    assert "Word.Application.Documents" in message
+    assert "acceder a los documentos" in message
+    assert "registro COM" in message
+
+
+def test_office_diagnostic_checks_pdf_text_and_preserves_source(tmp_path, monkeypatch):
+    import json
+    import zipfile
+    from app.diagnostics import office_self_test
+    def export(source, folder):
+        with zipfile.ZipFile(source) as package:
+            assert b"WORD_PDF_RUNTIME_CHECK" in package.read("word/document.xml")
+            assert len(package.namelist()) == 3
+        output = str(Path(folder) / "result.pdf")
+        with fitz.open() as pdf:
+            pdf.new_page().insert_text((30, 50), "WORD_PDF_RUNTIME_CHECK")
+            pdf.save(output)
+        return output
+    monkeypatch.setattr(creation, "office_to_pdf_file", export)
+    assert office_self_test(str(tmp_path)) == 0
+    result = json.loads((tmp_path / "office_self_test_result.json").read_text(encoding="utf-8"))
+    assert result["ok"] and result["checks"] == {"word_pdf": True}
+
+
+def test_office_diagnostic_reports_original_error(tmp_path, monkeypatch):
+    import json
+    from app.diagnostics import office_self_test
+    def fail(*args):
+        raise office365.OfficeConversionError("Word.Application.Documents")
+    monkeypatch.setattr(creation, "office_to_pdf_file", fail)
+    assert office_self_test(str(tmp_path)) == 1
+    result = json.loads((tmp_path / "office_self_test_result.json").read_text(encoding="utf-8"))
+    assert result["ok"] is False
+    assert "Word.Application.Documents" in result["error"]

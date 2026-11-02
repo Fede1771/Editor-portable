@@ -1,16 +1,13 @@
 # 📄 Editor PDF Portable
 
 [![Windows](https://img.shields.io/badge/Plataforma-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
-[![Versión](https://img.shields.io/badge/Versi%C3%B3n-2.1.0-blue)](https://github.com/Fede1771/Editor-portable/releases/tag/2.1.0)
-[![Procesamiento local](https://img.shields.io/badge/Procesamiento-100%25%20Local-success)](#-seguridad-y-privacidad)
-[![Privacidad](https://img.shields.io/badge/Privacidad-Cero%20Huella-blue)](#-seguridad-y-privacidad)
-[![Pruebas](https://img.shields.io/badge/Pruebas-250%20aprobadas-success)](Proyecto/tests)
-[![Tamaño ZIP](https://img.shields.io/badge/Tama%C3%B1o%20ZIP-~192%20MB-informational)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)
-[![Licencia](https://img.shields.io/badge/Licencia-MIT-green)](LICENSE)
+[![Versión publicada](https://img.shields.io/github/v/release/Fede1771/Editor-portable)](https://github.com/Fede1771/Editor-portable/releases/latest)
+[![Procesamiento local](https://img.shields.io/badge/Procesamiento-Local-success)](#-privacidad-y-almacenamiento)
+[![Pruebas](https://img.shields.io/badge/Pruebas-pytest-success)](Proyecto/tests)
 
-> **Editor de PDF de escritorio nativo para Windows: ligero, autónomo y privado.**
+> **Editor de PDF de escritorio para Windows, con procesamiento local y distribución portable.**
 >
-> Leé documentos con fluidez, editá texto directamente respetando su tipografía, organizá páginas, editá tablas de forma vectorial, aplicá OCR local sin conexión, censurá datos sensibles de forma irreversible, completá formularios interactivos, comprimí archivos y creá nuevos PDFs a partir de imágenes o documentos de Office. Todo se procesa **100% en tu equipo**, sin telemetría, sin suscripciones y sin enviar tus archivos a servidores externos.
+> Leé documentos, editá texto, organizá páginas, modificá tablas vectoriales, aplicá OCR local, censurá contenido, completá formularios y comprimí archivos. También podés crear PDFs a partir de imágenes, HTML, texto o documentos de Office. La conversión de Office requiere la aplicación de escritorio correspondiente, instalada y activada.
 
 ---
 
@@ -29,7 +26,7 @@
 - [❓ Preguntas frecuentes (FAQ)](#-preguntas-frecuentes-faq)
 - [👨‍💻 Guía de desarrollo y compilación](#-guía-de-desarrollo-y-compilación)
 - [📚 Documentación técnica complementaria](#-documentación-técnica-complementaria)
-- [📄 Licencia](#-licencia)
+- [🔒 Privacidad y almacenamiento](#-privacidad-y-almacenamiento)
 
 ---
 
@@ -47,7 +44,7 @@ No requiere instalación, permisos de administrador ni dependencias previas de P
 ## 💻 Requisitos del usuario final
 
 - **Sistema Operativo:** Windows 10 o Windows 11 (ediciones de 64 bits).
-- **Entorno de ejecución:** 100% portable y autónomo. No requiere instalar Python, librerías del sistema ni configurar variables de entorno. Puede ejecutarse desde cualquier disco local, pendrive o carpeta de red.
+- **Entorno de ejecución:** El ZIP incluye Python y las bibliotecas de la app. Extraelo en una carpeta con permisos de lectura y escritura; las políticas del equipo pueden restringir la ejecución desde USB o ubicaciones de red.
 - **Microsoft 365 de escritorio (opcional):** Únicamente necesario si deseás crear PDFs a partir de documentos de Word (`.docx`), Excel (`.xlsx`) o PowerPoint (`.pptx`) mediante `Ctrl + N`. Todas las demás funciones (lectura, edición de texto, maquetación, tablas, anotaciones, OCR, formularios, compresión y exportación a imágenes) son completamente autónomas e independientes de Office.
 
 ---
@@ -67,13 +64,13 @@ No requiere instalación, permisos de administrador ni dependencias previas de P
 
 ## ⚖️ ¿Por qué elegir Editor PDF Portable?
 
-| Característica | Editor PDF Portable | Servicios Web / En la nube | Editores Comerciales Tradicionales |
-|---|---|---|---|
-| **Privacidad y seguridad** | **100% local**: tus archivos nunca salen de tu computadora ni se envían a servidores externos. | Suben tus documentos a servidores de terceros para procesarlos. | Suelen recopilar analíticas y telemetría de uso. |
-| **Edición de tablas** | **Motor vectorial contextual**: insertá o eliminá filas/columnas y ajustá altos en mm sin rasterizar a imagen. | Generalmente rompen el diseño de la tabla o no lo admiten. | Muy pocos editores permiten editar tablas vectoriales directamente. |
-| **Modelo y costo** | **Gratuito, libre y sin límites**: sin suscripciones, sin registros de usuario ni publicidad. | Planes con límites diarios de páginas, marcas de agua o pagos mensuales. | Licencias anuales o suscripciones costosas. |
-| **Instalación y portabilidad** | **100% Portable**: funciona desde cualquier carpeta o pendrive sin tocar el registro del sistema. | Requiere conexión a internet constante. | Instaladores pesados que exigen privilegios de administrador. |
-| **OCR (Reconocimiento)** | **Local y sin conexión**: motor Tesseract offline en español e inglés sin demoras de red. | Limitado por colas de espera en la nube y tamaño de archivo. | Módulos de pago adicionales o paquetes separados. |
+| Característica | Qué ofrece | Consideración práctica |
+|---|---|---|
+| **Procesamiento local** | Edición y OCR en el equipo. | Office, enlaces e impresoras tienen su propia configuración y comportamiento. |
+| **Tablas vectoriales** | Inserción y eliminación de filas y columnas, con altura en mm y barra contextual. | Requiere una grilla detectable y espacio para realizar la operación. |
+| **Distribución portable** | ZIP con runtime de Python y bibliotecas incluidos. | Conservá `_internal/`; las preferencias y los temporales pueden escribirse en el equipo. |
+| **OCR español e inglés** | Reconocimiento local mediante Tesseract y modelos incluidos. | No reconstruye automáticamente una tabla editable desde un escaneo. |
+| **Office → PDF** | Exportación con Word, Excel o PowerPoint. | Requiere la aplicación de escritorio correspondiente, instalada y activada. |
 
 ---
 
@@ -188,11 +185,11 @@ Si necesitás estirar una página completa o realizar un corte por coordenadas v
 - **Idiomas incluidos:** Soporte local integrado para español (`spa`) e inglés (`eng`) mediante archivos entrenados empaquetados en `Proyecto/data/tessdata/`.
 - **Sin conexión:** El reconocimiento se ejecuta exclusivamente en el procesador local; tus documentos confidenciales nunca se transmiten a la nube.
 
-### 6. Censura destructiva permanente (Cero Huella)
-- **Purga física irreversible:** Con la herramienta **Censurar** (`R`), seleccioná áreas rectangulares para ocultar datos sensibles (DNI, nombres, cuentas bancarias).
+### 6. Censura y sesión privada
+- **Seleccionar áreas:** Con la herramienta **Censurar** (`R`), marcá las regiones que contienen los datos que querés eliminar del PDF.
 - **Búsqueda automática de patrones:** Censurá automáticamente números de documento, correos electrónicos o términos específicos en todo el PDF.
-- **Seguridad comprobada:** El texto, los gráficos y los metadatos ocultos bajo el área censurada se eliminan físicamente de la estructura del PDF; no es una máscara superficial, impidiendo la recuperación mediante selección de texto o inspección de capas.
-- **Modo Sesión Privada:** Permite trabajar sin registrar documentos recientes ni dejar rastros de historial en el sistema, liberando los temporales al cerrar.
+- **Revisión del resultado:** La censura aplica operaciones de eliminación de contenido PDF. Revisá la copia guardada, los adjuntos, las anotaciones y los metadatos antes de compartirla; no equivale a borrar copias previas del archivo ni garantiza que no queden datos en otros objetos.
+- **Modo Sesión Privada:** Evita registrar archivos recientes del editor y gestiona sus temporales. No controla cachés de Office, el sistema operativo, copias de seguridad o la cola de impresión.
 
 ### 7. Optimización y compresión inteligente
 - **Perfiles preconfigurados:** Reducí el peso del archivo según el destino (envío por correo, archivo digital liviano o documentos de alta fidelidad).
@@ -203,8 +200,19 @@ Si necesitás estirar una página completa o realizar un corte por coordenadas v
 - **Exportar a imágenes:** Guardá páginas del PDF como imágenes independientes en alta resolución (PNG o JPEG) seleccionando rango de páginas y resolución (DPI).
 - **Gestor de adjuntos (`Ctrl + Shift + A`):** Consultá, extraé, incrustá o eliminá archivos adjuntos embebidos en el PDF.
 
+#### Convertir Word, Excel o PowerPoint a PDF
+
+1. Abrí una vez la aplicación de escritorio correspondiente y verificá que esté activada y sin avisos de configuración pendientes. Office web no es suficiente.
+2. En el editor, presioná **Ctrl + N**, elegí el documento y confirmá el orden en el diálogo de creación. Para Word se aceptan `.docx`, `.doc`, `.rtf` y `.odt`; para Excel `.xlsx`, `.xls` y `.ods`; para PowerPoint `.pptx`, `.ppt` y `.odp`. La compatibilidad concreta depende de la versión instalada de Office.
+3. Esperá la conversión. El editor abre el documento de origen como solo lectura y recibe un PDF nuevo; no guarda cambios sobre el archivo de Office.
+4. Revisá las páginas de la pestaña nueva y presioná **Ctrl + S** para elegir dónde guardar el resultado.
+
+Si falla, conservá el mensaje completo del aviso. Revisá instalación y activación, contraseña o Vista protegida, permisos de lectura/escritura, fuentes y posibles diálogos pendientes. PowerPoint debe estar cerrado antes de convertir. El límite predeterminado es de 240 segundos por trabajo; los detalles de aislamiento y diagnóstico están en la [guía de Microsoft 365](Proyecto/docs/MICROSOFT365.md).
+
+**Si aparece `Word.Application.Documents`:** falló el acceso a la automatización de Word. La versión actual incluye una consulta alternativa a COM y reintentos acotados cuando Word está ocupado. Si persiste en un equipo concreto, ejecutá el [diagnóstico opcional `--self-test-office`](Proyecto/docs/MICROSOFT365.md#diagnóstico-de-word-en-otro-equipo) y conservá `office_self_test_result.json` para revisar la causa con soporte. Que convierta en otro equipo no prueba que la instalación corporativa esté configurada igual.
+
 ### 9. Impresión nativa (`Ctrl + P`)
-- Conexión directa con el subsistema de impresión de Windows (`win32print`), permitiendo elegir impresoras locales o de red, configurar rangos de páginas o imprimir las páginas seleccionadas en las miniaturas, incluyendo las ediciones en curso.
+- Integración con los controladores de Windows mediante **QtPrintSupport (`QPrinter`)**, permitiendo elegir impresoras locales o de red, configurar rangos o imprimir las páginas seleccionadas en las miniaturas, incluyendo las ediciones en curso.
 
 ---
 
@@ -245,7 +253,7 @@ Si necesitás estirar una página completa o realizar un corte por coordenadas v
 
 ## 🛠️ Tecnologías y arquitectura
 
-El editor está construido íntegramente como una **aplicación nativa de escritorio para Windows** en Python, priorizando el rendimiento, la independencia y el consumo reducido de memoria. No utiliza frameworks web, navegadores embebidos ni Electron.
+El editor es una **aplicación de escritorio para Windows** escrita en Python, con interfaz Qt y motores nativos para procesar documentos. La interfaz no utiliza frameworks web, navegadores embebidos ni Electron.
 
 ```mermaid
 graph TD
@@ -260,14 +268,65 @@ graph TD
     Main --> PrintSubsystem["Impresión de Windows (win32print)"]
 ```
 
-### Componentes clave del sistema y herramientas:
-- **PySide6 6.12.0 (Qt 6):** Interfaz gráfica nativa con controles estilizados mediante paletas del sistema, renderizado de alta densidad (HiDPI) y distribución adaptativa de controles.
-- **PyMuPDF 2.0 (Motor Artifex MuPDF):** Motor principal de renderizado, análisis vectorial y composición de páginas mediante primitivas vectoriales (`show_pdf_page`), evitando la degradación de imagen al editar.
-- **pypdf 6.21.2:** Biblioteca auxiliar utilizada para inspección de bajo nivel y operaciones estructurales complementarias.
-- **pywin32 312:** Integración nativa con las APIs de Windows, enumeración de impresoras del sistema y automatización COM segura con Office.
-- **psutil 7.2.2:** Supervisión y aislamiento de procesos de fondo para garantizar la estabilidad y cierre limpio de instancias.
-- **PyInstaller 6.22.3:** Herramienta de compilación para generar el paquete portable autónomo de distribución en Windows x64.
-- **pytest 9.1.1:** Suite de pruebas automatizadas con más de 250 casos de prueba y regresión.
+### Tecnologías principales: qué hacen y por qué se usan
+
+Las versiones corresponden al [entorno fijado en el lock](Proyecto/requirements/requirements.lock). La columna «Por qué se usa» describe el criterio técnico que satisface cada componente; no pretende reconstruir decisiones históricas que no están documentadas.
+
+| Tecnología | Qué hace en este proyecto | Por qué se usa |
+|---|---|---|
+| **Python / CPython 3.14 x64** | Ejecuta la aplicación, coordina la interfaz, las operaciones PDF y los procesos auxiliares. | Permite combinar bibliotecas de documentos con APIs de Windows y mantener la lógica en módulos legibles. El trabajo intensivo se apoya en bibliotecas nativas. |
+| **PySide6 6.12.0 / Qt 6** | Proporciona ventanas, pestañas, diálogos, eventos, atajos, barras contextuales y gráficos de la interfaz. | Ofrece controles de escritorio, soporte HiDPI y señales para comunicar componentes sin construir una aplicación web. |
+| **QtCore, QtGui y QtWidgets** | Gestionan señales, geometría, controles, imágenes, pintura y distribución adaptable de herramientas. | Comparten el mismo modelo de eventos y renderizado de Qt; evitan mantener varias bibliotecas de interfaz. |
+| **QtPrintSupport** | `QPrinter`, el diálogo nativo y `QPainter` imprimen el documento que está en memoria, incluidas sus ediciones. | Permite seleccionar impresora, rangos y copias mediante los controladores instalados en Windows. La impresión del proyecto no se implementa mediante `win32print`. |
+| **QSettings** | Conserva preferencias e historial; normalmente usa el Registro de Windows. Con `EDITORPDF_SETTINGS_DIR` escribe un INI aislado. | Centraliza la configuración y permite aislarla en pruebas sin modificar las preferencias reales. |
+| **PyMuPDF 2.0 / MuPDF** | Abre y renderiza PDFs, extrae texto, detecta tablas, compone páginas, edita contenido, administra anotaciones, formularios y cifrado. También convierte imágenes y maqueta HTML con `Story`. | Reúne lectura, dibujo y edición en un motor nativo. En las tablas permite reutilizar contenido vectorial en lugar de convertir toda la página en una imagen. |
+| **pypdf 6.21.2** | Analiza objetos y streams PDF para formularios y apariencias; valida el PDF exportado por Office antes de publicarlo. | Complementa a MuPDF con acceso a estructuras PDF en Python. La validación de Office puede ejecutarse sin usar objetos PyMuPDF en el hilo receptor. |
+| **Tesseract y modelos `spa` / `eng`** | Reconocen español e inglés mediante la integración OCR de MuPDF; los archivos `.traineddata` están en `Proyecto/data/tessdata/`. | Permiten obtener texto buscable de páginas escaneadas de forma local. No se invoca un `tesseract.exe` externo ni se requiere instalarlo aparte para el portable. |
+| **pywin32 312** | Expone COM (`pythoncom`, `win32com.client`), mutex y funciones de Windows para identificar las instancias de Office. | Permite usar la exportación nativa de Office y controlar la instancia creada por el editor. |
+| **Microsoft Word, Excel y PowerPoint de escritorio / COM** | Abren documentos en modo de lectura y los exportan a PDF con el motor de la aplicación correspondiente. Son dependencias externas opcionales, no incluidas en el ZIP. | Aprovechan el motor que interpreta los formatos Office. Requieren instalación y activación local; Microsoft 365 web no proporciona este servidor COM. La fidelidad depende también de fuentes, configuración de impresión y contenido del archivo. |
+| **psutil 7.2.2** | Inspecciona PID, nombre y hora de creación de procesos; comprueba y limpia únicamente instancias identificadas como propias. | Reduce el riesgo de cerrar otra sesión de Office por confundirla con el trabajo de conversión. |
+| **Windows WIA y Windows PowerShell** | El flujo de escáner abre `WIA.CommonDialog` desde un proceso PowerShell STA y recibe una imagen. | Reutiliza los dispositivos y controladores de escaneo compatibles con Windows. Se necesita un escáner con soporte WIA. |
+| **Biblioteca estándar de Python** | `multiprocessing` con `spawn` aísla trabajos PDF/COM; `tempfile`, `pathlib`, `os.replace` y `shutil` gestionan archivos; `ctypes` consulta APIs de Windows; `json`, `re`, `html` y `urllib.parse` manejan datos y validaciones. | Resuelve coordinación, temporales y publicación atómica sin agregar dependencias para tareas que Python ya cubre. Los objetos Qt, COM y PDF no se comparten entre procesos. |
+| **PyInstaller 6.22.3** | Empaqueta Python, módulos, DLL y recursos en una distribución `onedir` con ejecutable y carpeta `_internal/`. | Permite distribuir la app a equipos sin Python. Empaqueta el runtime; no elimina la dependencia opcional de Office. |
+| **Tcl/Tk del splash de PyInstaller** | Presenta la imagen de inicio configurada en el archivo `.spec`, antes de que se muestre la ventana Qt. | Permite dar una indicación temprana de arranque; la interfaz principal sigue siendo PySide6. |
+| **PDF, OOXML, HTML y CSS** | PDF es el formato de trabajo; Office interpreta los formatos de Word/Excel/PowerPoint. MuPDF Story maqueta HTML y CSS para crear PDFs desde HTML o texto. | Reutilizan formatos documentales existentes. El soporte HTML/CSS de Story no equivale a un navegador completo ni ejecuta la interfaz de la aplicación. |
+| **pytest 9.1.1** | Ejecuta pruebas de edición, guardado, seguridad, procesos e interfaz; utiliza documentos sintéticos y preferencias aisladas. | Permite reproducir regresiones y verificar fallos sin usar documentos personales. Las simulaciones de COM no sustituyen una prueba real con Office. |
+| **Git y GitHub Releases** | Versionan el código y distribuyen el ZIP portable y las notas de cada publicación. | Separan el historial de fuentes de los binarios descargables. Git no es necesario para ejecutar el portable. |
+| **Markdown y Mermaid** | Presentan la guía de uso, tablas técnicas y diagramas de arquitectura en el repositorio. | Mantienen la documentación junto al código en formatos revisables; no forman parte de la ejecución del editor. |
+
+### Dependencias transitivas y herramientas del entorno
+
+El lock también fija los paquetes siguientes. Algunos llegan por Qt, PyMuPDF o las herramientas de desarrollo; **estar instalados no significa que la aplicación importe su API o exponga sus funciones al usuario**. El código de `app/` importa directamente PySide6, PyMuPDF, pypdf, pywin32 y psutil. Esta tabla completa el inventario del lock, sin presentar sus dependencias como elecciones independientes del editor.
+
+| Paquete y versión fijada | Función | Motivo de su presencia |
+|---|---|---|
+| **PySide6_Essentials 6.12.0** | Módulos básicos y bibliotecas Qt. | Es la base de los controles usados por PySide6. |
+| **PySide6_Addons 6.12.0** | Módulos adicionales de Qt, entre ellos soporte de impresión. | Completa la distribución de PySide6. |
+| **shiboken6 6.12.0** | Interoperabilidad entre objetos C++ de Qt y Python. | Es el runtime de los bindings de PySide6. |
+| **PySide6_Pdf 6.12.0.140** | Bindings de Qt PDF. | Llega con la distribución de PySide6; el visor del editor utiliza PyMuPDF. |
+| **PySide6_WebEngine 6.12.0.140** | Bindings del motor web de Qt. | Llega con PySide6; la interfaz del editor no usa un navegador embebido. |
+| **pymupdf_layout 2.0** | Componentes de análisis de disposición de documentos. | Dependencia de la versión fijada de PyMuPDF; la detección de tablas del editor usa trazos y `lines_strict`. |
+| **pymupdf4llm 2.0** | Utilidades de extracción de documentos orientadas a texto estructurado. | Dependencia de PyMuPDF 2.0; el editor no llama modelos de lenguaje ni ofrece un flujo RAG. |
+| **NumPy 2.5.4** | Arrays y cálculo numérico. | Soporte numérico del entorno de procesamiento documental. |
+| **ONNX Runtime (`onnxruntime`) 1.31.0** | Ejecución local de modelos en formato ONNX. | Forma parte de las dependencias del motor documental; el OCR de `app/ocr.py` usa Tesseract mediante MuPDF. |
+| **opencv-python-headless 5.0.0.93** | Operaciones de visión e imágenes sin ventanas propias. | Soporte del entorno documental; no es el sistema de interfaz del editor. |
+| **NetworkX 3.7** | Estructuras y algoritmos de grafos. | Dependencia declarada por PyMuPDF; no se usa directamente desde `app/`. |
+| **PyYAML 6.0.3** | Lectura y escritura de YAML. | Dependencia del motor documental; la configuración propia del editor utiliza QSettings. |
+| **tabulate 0.10.0** | Formateo de tablas de texto. | Dependencia declarada por PyMuPDF, no del control visual de tablas del editor. |
+| **FlatBuffers 25.12.19 y protobuf 7.36.2** | Representación y serialización de datos estructurados. | Soporte de las bibliotecas de modelos y procesamiento del entorno. |
+| **fonttools 4.67.0** | Inspección y manipulación de fuentes. | Herramienta auxiliar fijada en el entorno; sin importación directa en `app/`. |
+| **lxml 6.1.3** | Procesamiento de XML y HTML. | Biblioteca auxiliar conservada en el lock; el HTML propio de la app se maqueta con MuPDF Story. |
+| **fire 0.7.1 y termcolor 3.3.0** | Creación de interfaces de consola y formato de color. | Herramientas auxiliares del entorno; no construyen la interfaz Qt. |
+| **typing_extensions 4.16.0** | Tipos y compatibilidad de anotaciones Python. | Soporte para bibliotecas que necesitan estas definiciones. |
+| **altgraph 0.17.5** | Grafos de dependencias de módulos. | Ayuda a PyInstaller a analizar qué debe incluir en el paquete. |
+| **pefile 2024.8.26** | Inspección de ejecutables PE de Windows. | Soporte del empaquetado de ejecutables y DLL. |
+| **pyinstaller-hooks-contrib 2026.8** | Reglas de recolección de dependencias y recursos. | Complementa el análisis de PyInstaller para bibliotecas externas. |
+| **pywin32-ctypes 0.2.3** | Implementaciones auxiliares de APIs Win32 mediante `ctypes`. | Dependencia de PyInstaller; la automatización Office de la app usa pywin32. |
+| **packaging 26.3 y setuptools 84.2.0** | Interpretación de versiones y herramientas de distribución Python. | Soportan instalación, pruebas y empaquetado. |
+| **iniconfig 2.3.1 y pluggy 1.7.0** | Configuración INI y sistema de complementos. | Infraestructura utilizada por pytest. |
+| **Pygments 2.21.0 y colorama 0.4.6** | Resaltado y salida de consola compatible con Windows. | Mejoran los informes de pruebas y herramientas; no renderizan el PDF. |
+
+El lock registra un entorno completo, no una lista mínima de importaciones. Antes de quitar paquetes auxiliares conviene resolver de nuevo las dependencias y verificar ejecución, pruebas y empaquetado.
 
 ### Gestión de dependencias:
 - [`Proyecto/requirements/requirements.txt`](Proyecto/requirements/requirements.txt): Declara los rangos compatibles para la ejecución de la aplicación.
@@ -287,22 +346,20 @@ Para mantener total transparencia técnica y evitar expectativas no sustentadas 
 5. **Conservación del tamaño de página vs. espacio inferior:** Las operaciones contextuales de tabla están diseñadas para **no modificar el tamaño físico del PDF**. Si se intenta ampliar una fila pero no hay suficiente margen en el pie de página para desplazar el contenido inferior sin recortarlo, la ampliación se rechaza. Para ampliar la página entera físicamente, debe utilizarse el diálogo de *Ampliación avanzada*.
 6. **Redistribución de columnas:** Al insertar o eliminar columnas, el contenido de las celdas restantes se escala horizontalmente para conservar el ancho global de la tabla. Esto no constituye un motor universal de maquetación tipográfica (reflujo semántico de texto); textos muy extensos en columnas reducidas podrían comprimirse visualmente.
 7. **Elementos interactivos en columnas:** Si la tabla contiene notas adhesivas, enlaces o campos de formulario interactivos incrustados en su interior que no puedan reubicarse con total precisión geométrica, la redistribución de columnas se bloqueará para proteger dichos elementos.
-8. **Edición vs. Censura:** Eliminar una fila o columna es una operación de maquetación y diseño; no debe confundirse con la herramienta de **Censura destructiva** permanente (`R`), la cual es la única diseñada para purgar datos confidenciales garantizando la no recuperabilidad de los datos.
+8. **Edición vs. Censura:** Eliminar una fila o columna es una operación de maquetación. Para quitar datos sensibles usá **Censurar** (`R`) y revisá el PDF guardado, incluidos otros objetos donde esa información pueda repetirse.
 
 ---
 
 ## ❓ Preguntas frecuentes (FAQ)
 
 ### ¿Por qué Windows SmartScreen muestra una advertencia al abrir el portable por primera vez?
-Es el comportamiento habitual de Windows ante aplicaciones portables nuevas o de código abierto que no cuentan con un certificado comercial corporativo pago. El ejecutable está libre de virus y procesa todo 100% en local. Para abrirlo:
-1. Hacé clic en **Más información** en el cuadro de SmartScreen.
-2. Hacé clic en el botón **Ejecutar de todas formas**.
+Un ejecutable sin firma o con poca reputación de descarga puede activar SmartScreen. Verificá que provenga de las publicaciones de este repositorio y, cuando se publique, compará su SHA-256. Una compilación correcta o una suite de pruebas no certifican la ausencia de malware.
 
 ### ¿El programa deja archivos en mi computadora o toca el registro de Windows?
-No. El editor es **estrictamente portable**. No crea claves en el Registro de Windows ni instala servicios en segundo plano. Los únicos archivos temporales generados durante conversiones se guardan en la carpeta temporal aislada y se limpian al cerrar la aplicación. Podés usar el programa directamente desde un pendrive en cualquier computadora.
+El paquete no necesita instalador, pero **sí puede guardar preferencias en el Registro de Windows** mediante QSettings y crear temporales para conversiones, OCR, escáner y adjuntos. Consultá [Privacidad y almacenamiento](#-privacidad-y-almacenamiento) para aislar las preferencias y conocer los límites de la limpieza.
 
 ### ¿Cómo sé si la tabla de mi PDF es editable con la nueva herramienta?
-Si al pasar el ratón podés seleccionar el texto de las celdas individualmente y los bordes son líneas vectoriales limpias, el motor la detectará automáticamente al presionar `B` o hacer clic con `V`. Si el documento es una hoja escaneada o una foto donde todo es una imagen fija, primero debés aplicar **Documento → OCR** para digitalizar el contenido.
+Probá haciendo clic en una celda con `V` o `B`: si la grilla vectorial es detectable, aparecerá la barra contextual. Poder seleccionar el texto no garantiza que exista una grilla editable. **El OCR agrega texto buscable a un escaneo, pero no reconstruye bordes vectoriales ni lo convierte en una tabla editable.**
 
 ### ¿Necesito tener Microsoft Office instalado para usar el editor?
 No. Todas las funciones de lectura, edición de texto, maquetación de tablas, anotaciones, OCR, censura, compresión, formularios y exportación a imágenes funcionan de forma autónoma. Office solo es necesario si deseás crear un PDF directamente a partir de archivos `.docx`, `.xlsx` o `.pptx` mediante `Ctrl + N`.
@@ -315,7 +372,7 @@ Esta sección está destinada a desarrolladores que deseen clonar el repositorio
 
 ### 1. Clonación del repositorio
 ```powershell
-git clone https://github.com/Fede1771/Editor-portable.git
+git clone https://github.com/Fede1771/Editor-portable.git "Editor portable"
 cd "Editor portable"
 ```
 
@@ -349,15 +406,15 @@ El proyecto cuenta con una batería completa de pruebas unitarias y de integraci
 ```powershell
 .\Proyecto\.venv\Scripts\python.exe -m pytest Proyecto\tests -q
 ```
-*Resultado esperado:* 250 pruebas aprobadas (y advertencias controladas de obsolescencia de llamadas Qt en pruebas sintéticas).
+La cantidad cambia al incorporar regresiones; usá el resultado de la ejecución actual como referencia. Las pruebas de conversión con COM simulado no comprueban por sí solas la instalación real de Office.
 
 ### 5. Compilación del ejecutable portable y empaquetado ZIP
 El script [`Proyecto/scripts/build_portable.py`](Proyecto/scripts/build_portable.py) automatiza la compilación con PyInstaller y genera la carpeta de distribución y el archivo ZIP:
 ```powershell
 .\Proyecto\.venv\Scripts\python.exe Proyecto\scripts\build_portable.py
 ```
-- **Directorio de salida:** [`Programa/EditorPDFPortable/`](Programa/EditorPDFPortable/)
-- **Archivo empaquetado:** [`Programa/EditorPDFPortable.zip`](Programa/EditorPDFPortable.zip)
+- **Directorio de salida:** `Programa/EditorPDFPortable/`.
+- **Archivo empaquetado:** `Programa/EditorPDFPortable.zip`.
 - **Parámetros opcionales:**
   - `--dist-dir <ruta>`: Especifica una carpeta de distribución personalizada.
   - `--work-dir <ruta>`: Especifica la carpeta de archivos temporales de compilación.
@@ -366,7 +423,9 @@ El script [`Proyecto/scripts/build_portable.py`](Proyecto/scripts/build_portable
 ### 6. Autoprueba del binario compilado
 El ejecutable generado incluye un modo de autodiagnóstico integrado que valida sus subsistemas sin abrir la interfaz gráfica:
 ```powershell
-Programa\EditorPDFPortable\EditorPDFPortable.exe --self-test Proyecto\build\verificacion-release
+$check = Start-Process -FilePath '.\Programa\EditorPDFPortable\EditorPDFPortable.exe' -ArgumentList '--self-test', 'Proyecto\build\verificacion-release' -Wait -PassThru -WindowStyle Hidden
+$check.ExitCode
+Get-Content Proyecto\build\verificacion-release\self_test_result.json
 ```
 Revisá el archivo de resultado generado en `Proyecto/build/verificacion-release/self_test_result.json`, el cual debe indicar `"ok": true` en las comprobaciones de:
 - `independent_process`: Ejecución independiente sin dependencias externas.
@@ -374,11 +433,10 @@ Revisá el archivo de resultado generado en `Proyecto/build/verificacion-release
 - `encrypted_compression`: Cifrado y optimización segura.
 - `ocr`: Detección del motor local y rutas de `tessdata`.
 
+Esta autoprueba general **no incluye Word, Excel ni PowerPoint**. La conversión Office debe comprobarse aparte en un equipo con las aplicaciones instaladas, usando documentos sintéticos.
+
 ### 7. Solución de problemas durante la compilación
-- **Archivos bloqueados (`PermissionError` o `Acceso denegado`):** Si PyInstaller falla al reemplazar archivos en `Programa/EditorPDFPortable/`, verificá si existe un proceso de prueba previo ejecutándose en segundo plano mediante el Administrador de tareas o PowerShell:
-  ```powershell
-  Get-Process EditorPDFPortable -ErrorAction SilentlyContinue | Stop-Process -Force
-  ```
+- **Archivos bloqueados (`PermissionError` o `Acceso denegado`):** Guardá tus documentos y cerrá la instancia que ejecuta el binario a reemplazar. Si quedó un proceso de prueba sin ventana, verificá su ruta y PID antes de finalizar exclusivamente ese proceso. Evitá cerrar todos los procesos por nombre: podrían contener documentos sin guardar.
 - **Temporales del sistema en entornos restringidos:** Si el directorio temporal del sistema tiene restricciones de permisos, configurá un temporal local dentro del espacio de trabajo antes de compilar:
   ```powershell
   New-Item -ItemType Directory -Force Proyecto\build\test-temp | Out-Null
@@ -398,6 +456,15 @@ Revisá el archivo de resultado generado en `Proyecto/build/verificacion-release
 
 ---
 
-## 📄 Licencia
+## 🔒 Privacidad y almacenamiento
 
-Este proyecto se distribuye bajo los términos de la licencia MIT. Consultá el archivo [LICENSE](LICENSE) para más detalles.
+- Las operaciones PDF y OCR del editor se realizan localmente. Abrir enlaces, utilizar Office o imprimir en red puede implicar servicios externos ajenos al motor PDF.
+- Las preferencias usan QSettings y, por defecto en Windows, el Registro. Para guardarlas en un INI propio al iniciar desde PowerShell:
+
+  ```powershell
+  $env:EDITORPDF_SETTINGS_DIR = Join-Path (Get-Location) 'preferencias'
+  .\Programa\EditorPDFPortable\EditorPDFPortable.exe
+  ```
+
+- Las conversiones y otras operaciones crean temporales. El gestor intenta limpiar los archivos que identifica como propios y recuperar residuos tras un cierre inesperado; no garantiza borrado físico en SSD ni elimina rastros de terceros.
+- No hay un archivo `LICENSE` en el árbol actual. Antes de redistribuir el código o los binarios, debe aclararse la licencia del proyecto y revisarse la de sus dependencias; este README no concede una licencia MIT por sí mismo.
