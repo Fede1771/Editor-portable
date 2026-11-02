@@ -22,22 +22,36 @@ _APPS = {"word_pdf": "Word", "excel_pdf": "Excel", "powerpoint_pdf": "PowerPoint
 def _word_documents(app):
     """Resolver Documents sin depender sólo del mapa de tipos de pywin32.
 
-    Un AttributeError del wrapper puede ocultar un servidor COM ocupado durante
-    el arranque. Consultar la misma instancia con IDispatch preserva el HRESULT
-    real; nunca conectar a la sesión activa ni regenerar cachés compartidas.
+    Un AttributeError del wrapper o un error de acceso al registro OLE/TypeLib
+    puede resolverse mediante invocación directa por IDispatch sin depender
+    de las claves de registro de la biblioteca de tipos.
     """
     import pythoncom
     import win32com.client
+    import win32com.client.build
+    import win32com.client.dynamic
     retryable = {-2147418111, -2147417846, -2147417845}  # llamadas rechazadas/ocupadas
+    typelib_errors = {-2147319780, -2147319779, -2147312566, -2147352570}  # TypeLib/registro OLE
     for attempt in range(8):
         try:
             try:
                 return app.Documents
-            except AttributeError:
-                raw = app._oleobj_
+            except (AttributeError, pythoncom.com_error) as exc:
+                if isinstance(exc, pythoncom.com_error) and exc.hresult not in typelib_errors:
+                    raise
+                raw = getattr(app, "_oleobj_", None)
+                if raw is None or not hasattr(raw, "GetIDsOfNames"):
+                    raise
                 dispid = raw.GetIDsOfNames(0, "Documents")
                 value = raw.Invoke(dispid, 0, pythoncom.DISPATCH_PROPERTYGET, True)
-                return win32com.client.Dispatch(value, "Word.Documents")
+                try:
+                    return win32com.client.Dispatch(value, "Word.Documents")
+                except pythoncom.com_error as com_err:
+                    if com_err.hresult in typelib_errors:
+                        return win32com.client.dynamic.CDispatch(
+                            value, win32com.client.build.DispatchItem(), "Word.Documents"
+                        )
+                    raise
         except pythoncom.com_error as exc:
             if exc.hresult not in retryable or attempt == 7:
                 raise
@@ -55,12 +69,13 @@ def _error_message(name, exc, stage):
     code = getattr(exc, "hresult", None)
     hint = ""
     if name == "Word" and (isinstance(exc, AttributeError) and "Documents" in detail
-                           or code in {-2147352570, -2147319779, -2147312566}):
+                           or code in {-2147352570, -2147319779, -2147312566, -2147319780}):
         hint = (
-            "No se pudo acceder a la automatización de documentos de Word. "
-            "Abrí Word manualmente y verificá su activación y avisos pendientes. "
-            "Si persiste en este equipo, pedí a soporte que revise o repare "
-            "la instalación y el registro COM de Office; no hace falta modificar el documento. "
+            "No se pudo acceder a la automatización de documentos de Word (posibles restricciones de permisos, "
+            "directivas corporativas o del Registro OLE/COM en este equipo). "
+            "Probá ejecutar el programa como Administrador o realizar una Reparación Rápida de Office desde Configuración. "
+            "Si el equipo es administrado por una empresa, solicitá a soporte técnico que revise la instalación de Office; "
+            "no hace falta modificar el documento. "
         )
     elif code in {-2147221164, -2147221005}:
         hint = f"Se necesita {name} de escritorio instalado y activado; la versión web no alcanza. "

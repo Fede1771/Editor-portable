@@ -40,6 +40,7 @@ Para crear un PDF desde un archivo de Office, usá **Crear PDF desde archivos…
 | Excel exporta un PDF con contenido recortado. | Revisá los anchos de columna, el área de impresión y la escala del archivo de origen en Excel. |
 | La conversión supera el tiempo máximo. | Revisá contraseñas, avisos pendientes de Office y restricciones corporativas. |
 | `Microsoft 365 (Word): Word.Application.Documents`. | Falló el acceso a la colección de documentos de Word, antes de exportar. El mensaje aislado no identifica una causa única: puede involucrar disponibilidad de COM, metadatos de automatización o la instalación de Office del equipo. Probá el diagnóstico siguiente y entregá el informe a soporte si persiste. |
+| Error al tener acceso al Registro OLE (`-2147319780` / `0x8002801C`). | Frecuente en PCs de trabajo/corporativas con cuentas estándar o directivas (GPO) que restringen el acceso a `HKEY_CLASSES_ROOT\TypeLib` en Office Click-to-Run. El editor recurre automáticamente a la interfaz directa `IDispatch` en memoria sin consultar el registro de tipos. Si el bloqueo persiste por políticas de dominio, ejecutá el editor como Administrador o realizá una Reparación Rápida de Office desde Configuración > Aplicaciones. |
 
 ### Diagnóstico de Word en otro equipo
 

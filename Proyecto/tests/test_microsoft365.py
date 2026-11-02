@@ -122,6 +122,54 @@ def test_word_documents_falls_back_to_same_dispatch_without_creating_word(monkey
     assert office365._word_documents(Word()) is collection
 
 
+def test_word_documents_falls_back_on_ole_registry_access_error(monkeypatch):
+    import pythoncom
+    import win32com.client
+    collection = object()
+    raw_collection = object()
+    class Raw:
+        def GetIDsOfNames(self, locale, name):
+            assert (locale, name) == (0, "Documents")
+            return 6
+        def Invoke(self, dispid, locale, kind, result):
+            assert (dispid, locale, kind, result) == (6, 0, pythoncom.DISPATCH_PROPERTYGET, True)
+            return raw_collection
+    class Word:
+        _oleobj_ = Raw()
+        @property
+        def Documents(self):
+            raise pythoncom.com_error(-2147319780, "Error al tener acceso al Registro OLE.", None, None)
+    def wrap(value, name):
+        assert value is raw_collection
+        return collection
+    monkeypatch.setattr(win32com.client, "Dispatch", wrap)
+    monkeypatch.setattr(win32com.client, "DispatchEx", lambda *a: pytest.fail("No iniciar otra sesión"))
+    assert office365._word_documents(Word()) is collection
+
+
+def test_word_documents_falls_back_to_pure_cdispatch_when_dispatch_wrap_fails_registry(monkeypatch):
+    import pythoncom
+    import win32com.client
+    import win32com.client.dynamic
+    raw_collection = object()
+    class Raw:
+        def GetIDsOfNames(self, locale, name):
+            return 6
+        def Invoke(self, dispid, locale, kind, result):
+            return raw_collection
+    class Word:
+        _oleobj_ = Raw()
+        @property
+        def Documents(self):
+            raise pythoncom.com_error(-2147319780, "Error al tener acceso al Registro OLE.", None, None)
+    def failing_wrap(value, name):
+        raise pythoncom.com_error(-2147319780, "Error al tener acceso al Registro OLE.", None, None)
+    monkeypatch.setattr(win32com.client, "Dispatch", failing_wrap)
+    wrapped = office365._word_documents(Word())
+    assert isinstance(wrapped, win32com.client.dynamic.CDispatch)
+    assert wrapped._oleobj_ is raw_collection
+
+
 def test_word_documents_retries_busy_startup_but_not_access_denied(monkeypatch):
     import pythoncom
     collection = object()
@@ -223,7 +271,17 @@ def test_office_worker_reports_documents_error_with_stage(monkeypatch):
     assert kind == "error"
     assert "Word.Application.Documents" in message
     assert "acceder a los documentos" in message
-    assert "registro COM" in message
+    assert "Registro OLE/COM" in message
+
+
+def test_office_error_message_reports_ole_registry_access_hint():
+    import pythoncom
+    err = pythoncom.com_error(-2147319780, "Error al tener acceso al Registro OLE.", None, None)
+    msg = office365._error_message("Word", err, "acceder a los documentos de Word")
+    assert "Registro OLE/COM" in msg
+    assert "Administrador" in msg
+    assert "Reparación Rápida" in msg
+    assert "-2147319780" in msg
 
 
 def test_office_diagnostic_checks_pdf_text_and_preserves_source(tmp_path, monkeypatch):
