@@ -13,13 +13,14 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QStackedWidget,
-    QTabWidget, QToolBar, QToolButton, QWidget,
+    QTabWidget, QToolBar, QToolButton, QWidget, QHBoxLayout, QVBoxLayout,
 )
 
 from . import content_ops as cops
 from . import creation
 from . import ocr
 from . import operations as ops
+from . import table_edit
 from . import optimizer as opt
 from . import annotations as annot_mod
 from . import forms as forms_mod
@@ -160,10 +161,10 @@ class MainWindow(QMainWindow):
         # Herramientas de interacción, anotación y edición de contenido
         self.a_tool_pan = self._act("🖐 Mano", lambda: self._set_active_tool(TOOL_PAN), "H", "Desplazar con la mano", checkable=True)
         self.a_tool_select = self._act("🔤 Seleccionar", lambda: self._set_active_tool(TOOL_SELECT), "V", "Seleccionar y copiar texto", checkable=True)
-        self.a_tool_text = self._act("✍ Texto", lambda: self._set_active_tool(TOOL_TEXT), "T", "Insertar cuadro de texto", checkable=True)
+        self.a_tool_text = self._act("Editar texto", lambda: self._set_active_tool(TOOL_TEXT), "T", "Editar texto existente o insertar un cuadro de texto", checkable=True)
         self.a_tool_redact = self._act("⬛ Censurar", lambda: self._set_active_tool(TOOL_REDACT), "R", "Censurar / Redactar permanentemente", checkable=True)
         self.a_tool_image = self._act("🖼 Imagen", lambda: self._set_active_tool(TOOL_IMAGE), "I", "Insertar imagen en la página", checkable=True)
-        self.a_tool_table = self._act("📐 Ampliar tabla", lambda: self._set_active_tool(TOOL_TABLE), "B", "Ampliar filas de tabla arrastrando con el mouse", checkable=True)
+        self.a_tool_table = self._act("Tablas", lambda: self._set_active_tool(TOOL_TABLE), "B", "Seleccionar una celda para insertar filas, columnas o cambiar su alto", checkable=True)
         self.a_tool_link = self._act("🔗 Enlace", lambda: self._set_active_tool(TOOL_LINK), "L", "Insertar enlace web o salto de página", checkable=True)
         self.a_tool_pen = self._act("✏ Lápiz", lambda: self._set_active_tool(TOOL_PEN), "P", "Dibujar a mano alzada", checkable=True)
         self.a_tool_highlight = self._act("🖍 Resaltar", lambda: self._set_active_tool(TOOL_HIGHLIGHT), "Shift+H", "Resaltar texto o área", checkable=True)
@@ -207,7 +208,7 @@ class MainWindow(QMainWindow):
 
         self.tool_actions = [
             self.a_tool_pan, self.a_tool_select, self.a_tool_text, self.a_tool_redact,
-            self.a_tool_image, self.a_tool_link, self.a_tool_pen,
+            self.a_tool_image, self.a_tool_table, self.a_tool_link, self.a_tool_pen,
             self.a_tool_highlight, self.a_tool_underline, self.a_tool_strikeout, self.a_tool_note,
             self.a_find_redact, self.a_extract_imgs,
         ]
@@ -219,115 +220,104 @@ class MainWindow(QMainWindow):
         ]
 
     def _build_toolbar(self):
-        tb = QToolBar("Principal")
-        tb.setMovable(False)
-        tb.setStyleSheet("""
-            QToolBar {
-                spacing: 4px;
-                padding: 3px 6px;
-            }
-            QToolButton {
-                border: 1px solid transparent;
-                border-radius: 4px;
-                padding: 4px 7px;
-                font-size: 9pt;
-            }
-            QToolButton:hover {
-                background-color: rgba(128, 128, 128, 0.18);
-                border-color: rgba(128, 128, 128, 0.28);
-            }
-            QToolButton:checked {
-                background-color: rgba(26, 115, 232, 0.25);
-                border-color: #1a73e8;
-                font-weight: 600;
-            }
-            QToolButton:pressed {
-                background-color: rgba(26, 115, 232, 0.4);
-            }
-            QToolBar::separator {
-                width: 1px;
-                background-color: rgba(128, 128, 128, 0.3);
-                margin: 4px 6px;
-            }
-        """)
-        self.addToolBar(tb)
-
-        # Botón Menú Principal (☰ Menú)
-        self.btn_main = QToolButton()
-        self.btn_main.setText("☰ Menú ▾")
-        self.btn_main.setToolTip("Menú principal y herramientas completas")
+        from .tools_panel import ToolsPanel
+        panel = self.tools_panel = ToolsPanel(self)
+        self.btn_main = QToolButton(panel)
+        self.btn_main.setText("Archivo")
+        self.btn_main.setAccessibleName("Archivo y opciones del documento")
+        self.btn_main.setToolTip("Abrir, guardar, imprimir y otras opciones del documento")
         self.btn_main.setPopupMode(QToolButton.InstantPopup)
         self.btn_main.setMenu(self._build_main_dropdown_menu())
-        tb.addWidget(self.btn_main)
-        tb.addSeparator()
-
-        # Grupo 1: Acciones directas frecuentes
-        tb.addAction(self.a_open)
-        tb.addAction(self.a_save)
-        tb.addAction(self.a_compress)
-        tb.addSeparator()
-
-        # Grupo 2: Herramientas principales de edición (destacadas y minimalistas)
-        tb.addAction(self.a_tool_select)
-        tb.addAction(self.a_tool_text)
-        tb.addAction(self.a_tool_redact)
-        tb.addAction(self.a_tool_image)
-        tb.addAction(self.a_tool_table)
-
-        btn_annot = QToolButton()
-        btn_annot.setText("✏️ Anotar ▾")
-        btn_annot.setToolTip("Herramientas de dibujo y anotación")
-        btn_annot.setPopupMode(QToolButton.InstantPopup)
-        menu_annot = QMenu(btn_annot)
-        menu_annot.addAction(self.a_tool_pen)
-        menu_annot.addAction(self.a_tool_note)
-        menu_annot.addAction(self.a_tool_link)
-        btn_annot.setMenu(menu_annot)
-        tb.addWidget(btn_annot)
-
-        tb.addSeparator()
-
-        # Grupo 3: Navegación y Zoom compactos
-        tb.addAction(self.a_prev)
+        panel.quick_flow.addWidget(self.btn_main)
+        for action, label in [(self.a_open, "Abrir"), (self.a_save, "Guardar"),
+                              (self.a_undo, "Deshacer"), (self.a_redo, "Rehacer")]:
+            panel.quick_flow.addWidget(panel.button(action, panel, label))
+        navigation = QWidget(panel)
+        navigation_layout = QHBoxLayout(navigation)
+        navigation_layout.setContentsMargins(0, 0, 0, 0)
+        navigation_layout.setSpacing(3)
+        navigation_layout.addWidget(panel.button(self.a_prev, navigation))
         self.page_spin = QSpinBox()
         self.page_spin.setMinimum(1)
         self.page_spin.setKeyboardTracking(False)
+        self.page_spin.setAccessibleName("Página actual")
+        self.page_spin.setToolTip("Ir a la página indicada")
+        self.page_spin.setFixedWidth(58)
         self.page_spin.valueChanged.connect(lambda val: self._view_do("goto_page", val - 1))
-        tb.addWidget(self.page_spin)
+        navigation_layout.addWidget(self.page_spin)
         self.page_total = QLabel(" / 0 ")
-        tb.addWidget(self.page_total)
-        tb.addAction(self.a_next)
-
-        tb.addSeparator()
-
-        tb.addAction(self.a_zoom_out)
+        navigation_layout.addWidget(self.page_total)
+        navigation_layout.addWidget(panel.button(self.a_next, navigation))
+        panel.quick_flow.addWidget(navigation)
+        zoom = QWidget(panel)
+        zoom_layout = QHBoxLayout(zoom)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(3)
+        zoom_layout.addWidget(panel.button(self.a_zoom_out, zoom))
         self.zoom_combo = QComboBox()
         self.zoom_combo.setEditable(True)
         self.zoom_combo.addItems(ZOOM_PRESETS)
-        self.zoom_combo.setMinimumWidth(80)
+        self.zoom_combo.setFixedWidth(80)
+        self.zoom_combo.setAccessibleName("Nivel de zoom")
         self.zoom_combo.activated.connect(self._zoom_from_combo)
         self.zoom_combo.lineEdit().editingFinished.connect(self._zoom_from_combo)
-        tb.addWidget(self.zoom_combo)
-        tb.addAction(self.a_zoom_in)
-        tb.addAction(self.a_fit_w)
-
-        # Inicialización de modo para sincronización interna
+        zoom_layout.addWidget(self.zoom_combo)
+        zoom_layout.addWidget(panel.button(self.a_zoom_in, zoom))
+        zoom_layout.addWidget(panel.button(self.a_fit_p, zoom, "Ajustar página"))
+        panel.quick_flow.addWidget(zoom)
+        panel.quick_flow.addWidget(panel.button(self.a_find, panel, "Buscar texto"))
+        self.a_commands = self._act("Buscar herramienta…", self.show_tool_finder, "Ctrl+K",
+                                   "Encontrar cualquier herramienta por su nombre")
+        self.addAction(self.a_commands)
+        panel.quick_flow.addWidget(panel.button(self.a_commands, panel, "Herramientas"))
+        panel.quick_flow.addStretch(1)
+        panel.add_group("Editar", [(self.a_tool_select, "Seleccionar"), (self.a_tool_text, "Editar texto"),
+                                   (self.a_tool_image, "Insertar imagen"), (self.a_tool_redact, "Censurar"),
+                                   (self.a_tool_pan, "Mano"), (self.a_find_redact, "Buscar y censurar")])
+        panel.add_group("Tablas", [(self.a_tool_table, "Seleccionar tabla"),
+                                   (self.a_expand_table, "Ampliación avanzada…")])
+        panel.add_group("Anotar", [(self.a_tool_highlight, "Resaltar"), (self.a_tool_underline, "Subrayar"),
+                                   (self.a_tool_strikeout, "Tachar"), (self.a_tool_note, "Nota"),
+                                   (self.a_tool_pen, "Lápiz"), (self.a_tool_link, "Enlace")])
+        panel.add_group("Páginas", [(self.a_blank, "Página en blanco"), (self.a_insert, "Insertar PDF…"),
+                                    (self.a_dup, "Duplicar"), (self.a_delete, "Eliminar páginas"),
+                                    (self.a_pg_rot_l, "Rotar izquierda"), (self.a_pg_rot_r, "Rotar derecha"),
+                                    (self.a_extract, "Extraer…"), (self.a_split, "Dividir…"),
+                                    (self.a_crop, "Recortar…"), (self.a_side, "Miniaturas y paneles")])
+        panel.add_group("Documento", [(self.a_compress, "Comprimir PDF"), (self.a_ocr, "Reconocer texto (OCR)"),
+                                      (self.a_fill_forms, "Completar formulario"), (self.a_attachments, "Adjuntos"),
+                                      (self.a_watermark, "Marca de agua"), (self.a_header, "Encabezado y numeración"),
+                                      (self.a_export_images, "Exportar imágenes"), (self.a_print, "Imprimir")])
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Continuo", MODE_CONTINUOUS)
         self.mode_combo.addItem("Una página", MODE_SINGLE)
         self.mode_combo.addItem("Dos páginas", MODE_TWO)
-        self.mode_combo.activated.connect(
-            lambda _i: self._view_do("set_mode", self.mode_combo.currentData())
-        )
+        self.mode_combo.activated.connect(lambda _i: self._view_do("set_mode", self.mode_combo.currentData()))
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(panel)
+        self.takeCentralWidget()
+        layout.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
+        self.setMinimumWidth(560)
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        tb.addWidget(spacer)
+    def show_tool_finder(self):
+        from .tools_panel import ToolFinder
+        actions = [value for name, value in vars(self).items()
+                   if name.startswith("a_") and isinstance(value, QAction) and value is not self.a_commands]
+        tab = self.current_tab()
+        if tab and tab.view._table_selection:
+            actions.extend([tab.view.table_toolbar.delete_row_action, tab.view.table_toolbar.delete_column_action])
+        dialog = ToolFinder(actions, self)
+        if dialog.exec() == QDialog.Accepted and dialog.chosen_action:
+            dialog.chosen_action.trigger()
 
-        # Grupo 4: Utilidades, Privacidad y Búsqueda
-        tb.addAction(self.a_private_mode)
-        tb.addAction(self.a_side)
-        tb.addAction(self.a_find)
+    def _show_tool_group(self, name):
+        self.tools_panel.blockSignals(True)
+        self.tools_panel.choose(name)
+        self.tools_panel.blockSignals(False)
 
     def _build_main_dropdown_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -344,6 +334,10 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self.a_save)
         menu.addAction(self.a_save_as)
+        menu.addSeparator()
+        menu.addAction(self.a_undo)
+        menu.addAction(self.a_redo)
+        menu.addSeparator()
         menu.addAction(self.a_compress)
         menu.addAction(self.a_save_sanitized)
         menu.addAction(self.a_print)
@@ -532,6 +526,8 @@ class MainWindow(QMainWindow):
         tab.view.tableRowExpandRequested.connect(
             lambda pno, ys, dy, bbox, cols, t=tab: self._on_table_row_expand_requested(t, pno, ys, dy, bbox, cols)
         )
+        tab.view.tableEditRequested.connect(lambda request, t=tab: self._on_table_edit_requested(t, request))
+        tab.view.tableContextShown.connect(lambda t=tab: self._show_tool_group("Tablas") if t is self.current_tab() else None)
         tab.view.linkActivated.connect(self._on_link_activated)
         tab.view.textSelected.connect(lambda txt: self.status_msg.setText(f"Texto seleccionado ({len(txt)} caracteres). Presione Ctrl+C para copiar."))
         tab.view.set_tool(self._current_tool)
@@ -751,8 +747,11 @@ class MainWindow(QMainWindow):
             a.setEnabled(has)
         self.a_undo.setEnabled(has and tab.can_undo)
         self.a_redo.setEnabled(has and tab.can_redo)
+        if has:
+            tab.view.table_toolbar.undo_button.setEnabled(tab.can_undo)
         for w in (self.page_spin, self.zoom_combo, self.mode_combo):
             w.setEnabled(has)
+        self.tools_panel._resize_current()
         if not has:
             self.page_total.setText(" / 0 ")
             self.status_pages.setText("")
@@ -829,9 +828,12 @@ class MainWindow(QMainWindow):
         act = action_map.get(tool)
         if act and not act.isChecked():
             act.setChecked(True)
+        group = "Tablas" if tool == TOOL_TABLE else "Anotar" if tool in (
+            TOOL_HIGHLIGHT, TOOL_UNDERLINE, TOOL_STRIKEOUT, TOOL_PEN, TOOL_NOTE, TOOL_LINK) else "Editar"
+        self._show_tool_group(group)
         if tool == TOOL_TABLE:
             self.statusBar().showMessage(
-                "📐 Modo tabla activo: Posá el cursor sobre el borde inferior de una fila y arrastralo hacia abajo para estirarla.",
+                "Tablas: hacé clic en una celda para insertar filas o columnas. Arrastrá su borde inferior para ampliar el alto.",
                 6000,
             )
 
@@ -849,7 +851,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("No hay texto seleccionado para copiar.", 2000)
 
     def _on_table_row_expand_requested(self, tab: DocTab, pno: int, y_split: float, delta_y: float, bbox, cols):
-        self._edit(
+        success = self._edit(
             tab,
             lambda d: ops.expand_table_row(
                 d,
@@ -859,13 +861,45 @@ class MainWindow(QMainWindow):
                 table_bbox=bbox,
                 column_xs=cols,
                 extend_borders=True,
-                expand_page=True,
+                expand_page=False,
             ),
             f"Fila ampliada en página {pno + 1} (+{delta_y:.0f} pt)",
             select=[pno],
             goto=pno,
         )
-        self.statusBar().showMessage(f"📐 Fila ampliada con éxito (+{delta_y:.0f} pt) — Deshacer con Ctrl+Z", 4000)
+        if success:
+            self.statusBar().showMessage(f"Fila ampliada (+{delta_y * 25.4 / 72:.1f} mm) — Deshacer con Ctrl+Z", 4000)
+
+    def _on_table_edit_requested(self, tab: DocTab, request):
+        action = request["action"]
+        if action == "undo":
+            tab.undo()
+            return
+        pno, table = request["page"], request["table"]
+        row, column = request["row"], request["column"]
+        if action == "delete_row":
+            fn = lambda doc: table_edit.delete_row(doc, pno, table, row)
+            message = "Fila eliminada; el contenido inferior se acomodó hacia arriba."
+        elif action == "delete_column":
+            fn = lambda doc: table_edit.delete_column(doc, pno, table, column)
+            message = "Columna eliminada; se redistribuyó el ancho de las restantes."
+        elif action in ("column_after", "column_before"):
+            fn = lambda doc, col=column: table_edit.insert_column(doc, pno, table, col, before=action == "column_before")
+            message = "Columna insertada; se redistribuyó el ancho dentro de la tabla."
+            column += action == "column_after"
+        else:
+            insert = {"row_above": "above", "row_below": "below"}.get(action)
+            fn = lambda doc, selected_row=row: table_edit.edit_row(doc, pno, table, selected_row, height=request["height"], insert=insert)
+            message = "Fila insertada con el estilo original." if insert else "Alto de fila actualizado."
+            row += action == "row_below"
+        if self._edit(tab, fn, message, select=[pno], goto=pno):
+            tables = ops.detect_tables_on_page(tab.doc[pno])
+            match = next((t for t in tables if abs(t["bbox"][0] - table["bbox"][0]) < 3 and abs(t["bbox"][1] - table["bbox"][1]) < 3), None)
+            if match:
+                tab.view.select_table_cell(pno, match["index"], row, column)
+            else:
+                tab.view.close_table_toolbar()
+            self.statusBar().showMessage(message + " Deshacer con Ctrl+Z", 4000)
 
     def _on_text_requested(self, tab: DocTab, pno: int, rect: fitz.Rect):
         # 1. Buscar si se hizo clic o seleccionó un bloque/tarjeta de texto existente

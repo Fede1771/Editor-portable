@@ -10,6 +10,7 @@ from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixm
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu, QToolTip
 
 from .selection_popup import TextSelectionPopup
+from .table_toolbar import TableToolbar
 
 MARGIN = 16
 GAP = 12
@@ -155,6 +156,8 @@ class PdfView(QAbstractScrollArea):
     underlineRequested = Signal(int, object) # (page_idx, fitz.Rect)
     strikeoutRequested = Signal(int, object) # (page_idx, fitz.Rect)
     tableRowExpandRequested = Signal(int, float, float, object, object)  # (page_idx, y_split, delta_y, table_bbox, column_xs)
+    tableEditRequested = Signal(object)
+    tableContextShown = Signal()
     textSelected = Signal(str)               # Texto seleccionado copiado
     searchRequested = Signal(str)            # Solicitar búsqueda de texto
     linkActivated = Signal(str, str)         # (uri, visible_text) enlace externo clickeado
@@ -210,6 +213,8 @@ class PdfView(QAbstractScrollArea):
         self._table_drag_y_split = 0.0
         self._table_drag_start_y = 0.0
         self._table_drag_current_y = 0.0
+        self._table_selection = None
+        self._table_preview_height = None
 
         self._last_click_time = 0.0
         self._last_click_pos = QPointF()
@@ -222,6 +227,12 @@ class PdfView(QAbstractScrollArea):
         self.popup.copyRequested.connect(self._copy_selection)
         self.popup.highlightRequested.connect(self._highlight_selection)
         self.popup.strikeoutRequested.connect(self._strikeout_selection)
+        self.popup.editRequested.connect(self._on_edit_selection_requested)
+        self.popup.underlineRequested.connect(self._underline_selection)
+        self.table_toolbar = TableToolbar(self.viewport())
+        self.table_toolbar.actionRequested.connect(self._table_action)
+        self.table_toolbar.heightPreviewChanged.connect(self._preview_table_height)
+        self.table_toolbar.closed.connect(self.close_table_toolbar)
 
         self._prefetch_timer = QTimer(self)
         self._prefetch_timer.setSingleShot(True)
@@ -231,7 +242,8 @@ class PdfView(QAbstractScrollArea):
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.viewport().setBackgroundRole(self.backgroundRole())
-        self.viewport().setStyleSheet("background-color: #525659;")
+        self.viewport().setObjectName("PdfViewport")
+        self.viewport().setStyleSheet("QWidget#PdfViewport { background-color: #525659; }")
         self._update_cursor()
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
@@ -270,6 +282,7 @@ class PdfView(QAbstractScrollArea):
             self._hover_block = None
             self._hover_table_info = None
             self._table_drag_active = False
+            self.close_table_toolbar()
             self._selection_line_rects.clear()
             self._selection_page = -1
             self._selected_text = ""
@@ -322,6 +335,87 @@ class PdfView(QAbstractScrollArea):
             self.viewport().setCursor(QCursor(Qt.CrossCursor))
 
     # ------------------------------------------------------------- API pública
+    def close_table_toolbar(self):
+        self.table_toolbar.hide()
+        self._table_selection = None
+        self._table_preview_height = None
+        self.viewport().update()
+
+    def _table_at(self, pno, pt):
+        if pno not in self._tables_cache:
+            from .operations import detect_tables_on_page
+            self._tables_cache[pno] = detect_tables_on_page(self.doc[pno])
+        for table in self._tables_cache[pno]:
+            bounds = fitz.Rect(table["bbox"])
+            if not fitz.Rect(bounds.x0 - 7, bounds.y0 - 7, bounds.x1 + 7, bounds.y1 + 7).contains(pt):
+                continue
+            for row in table["rows"]:
+                if abs(pt.y - row["y_split"]) <= 4 / self.zoom:
+                    return pno, table, row, row["y_split"], True
+            for row in table["rows"]:
+                if fitz.Rect(row["bbox"]).contains(pt):
+                    return pno, table, row, row["y_split"], False
+        return None
+
+    def select_table_cell(self, pno, table_index, row_index, column_index=0):
+        if self._tool not in (TOOL_TABLE, TOOL_SELECT) or self._rotation or self.doc[pno].rotation:
+            self.close_table_toolbar()
+            return
+        from .operations import detect_tables_on_page
+        if pno not in self._tables_cache:
+            self._tables_cache[pno] = detect_tables_on_page(self.doc[pno])
+        tables = self._tables_cache[pno]
+        if not 0 <= table_index < len(tables):
+            self.close_table_toolbar()
+            return
+        table = tables[table_index]
+        row = table["rows"][max(0, min(row_index, len(table["rows"]) - 1))]
+        column_index = max(0, min(column_index, len(table["column_xs"]) - 2))
+        self._table_selection = pno, table, row, column_index
+        self._table_preview_height = None
+        self.table_toolbar.set_selection(table, row, column_index)
+        self.table_toolbar.show()
+        self._position_table_toolbar()
+        self.tableContextShown.emit()
+        self.viewport().update()
+
+    def _position_table_toolbar(self):
+        if not self._table_selection or not self.table_toolbar.isVisible():
+            return
+        pno, table, row, col = self._table_selection
+        if pno not in self._page_rects:
+            self.table_toolbar.hide()
+            return
+        page_rect = self._page_rects[pno].translated(-self.horizontalScrollBar().value(), -self.verticalScrollBar().value())
+        rect = self._map_rect(pno, fitz.Rect(table["bbox"])).translated(page_rect.topLeft())
+        if not rect.intersects(QRectF(self.viewport().rect())):
+            self.close_table_toolbar()
+            return
+        self.table_toolbar.fit_to_width(self.viewport().width() - 16)
+        width = self.table_toolbar.width()
+        x = max(6, min(int(rect.center().x() - width / 2), self.viewport().width() - width - 6))
+        y = int(rect.top() - self.table_toolbar.height() - 8)
+        if y < 6:
+            y = 6
+        self.table_toolbar.move(x, y)
+        self.table_toolbar.raise_()
+
+    def _preview_table_height(self, height):
+        self._table_preview_height = height
+        if self._table_selection:
+            row = self._table_selection[2]
+            self.table_toolbar.apply_button.setEnabled(abs(height - (row["bbox"][3] - row["bbox"][1])) > .2)
+        self.viewport().update()
+
+    def _table_action(self, action):
+        if action == "undo":
+            self.tableEditRequested.emit({"action": action})
+        elif self._table_selection:
+            pno, table, row, column = self._table_selection
+            self.tableEditRequested.emit({"action": action, "page": pno, "table": table,
+                                          "row": row["row_index"], "column": column,
+                                          "height": self.table_toolbar.height_spin.value() * 72 / 25.4})
+
     def set_zoom(self, zoom: float, fit: str = FIT_NONE):
         self._fit = fit
         self._apply_zoom(zoom)
@@ -349,6 +443,7 @@ class PdfView(QAbstractScrollArea):
         self.modeChanged.emit(mode)
 
     def rotate_view(self, delta: int):
+        self.close_table_toolbar()
         self._rotation = (self._rotation + delta) % 360
         self._relayout(keep_position=False)
         self.goto_page(self._current)
@@ -392,6 +487,7 @@ class PdfView(QAbstractScrollArea):
 
     def reload(self, doc: fitz.Document | None = None):
         """Vuelve a leer el documento (tras modificarlo) invalidando búsquedas y selecciones obsoletas (H23)."""
+        selection = self._table_selection
         old_sizes = self._sizes
         old_x = self.horizontalScrollBar().value()
         old_y = self.verticalScrollBar().value()
@@ -418,6 +514,11 @@ class PdfView(QAbstractScrollArea):
         self.popup.hide()
         self._current = min(self._current, max(0, self.page_count - 1))
         self._relayout()
+        if selection and selection[0] < self.page_count:
+            pno, table, row, column = selection
+            self.select_table_cell(pno, table["index"], row["row_index"], column)
+        else:
+            self.close_table_toolbar()
         if self._sizes == old_sizes:
             self.horizontalScrollBar().setValue(old_x)
             self.verticalScrollBar().setValue(old_y)
@@ -590,6 +691,7 @@ class PdfView(QAbstractScrollArea):
 
     def _on_scroll(self):
         self.popup.hide()
+        self._position_table_toolbar()
         self._update_current()
         self.viewport().update()
         if hasattr(self, "_prefetch_timer"):
@@ -915,6 +1017,24 @@ class PdfView(QAbstractScrollArea):
                 p2 = self._map_point(self._pen_page, fitz.Point(self._pen_stroke[i + 1])) + target_page.topLeft()
                 painter.drawLine(p1, p2)
 
+        if self._tool in (TOOL_TABLE, TOOL_SELECT) and self._table_selection:
+            pno, table, row, col = self._table_selection
+            if pno in self._page_rects:
+                target_page = self._page_rects[pno].translated(dx, dy)
+                selection_rect = self._map_rect(pno, fitz.Rect(row["bbox"])).translated(target_page.topLeft())
+                painter.fillRect(selection_rect, QColor(99, 102, 241, 25))
+                painter.setPen(QPen(QColor(99, 102, 241, 180), 1))
+                painter.drawRect(selection_rect)
+                xs = table["column_xs"]
+                cell = fitz.Rect(xs[col], row["bbox"][1], xs[col + 1], row["bbox"][3])
+                painter.setPen(QPen(QColor(99, 102, 241), 2))
+                painter.drawRect(self._map_rect(pno, cell).translated(target_page.topLeft()))
+                if self._table_preview_height is not None:
+                    rb = row["bbox"]
+                    preview = fitz.Rect(rb[0], rb[1], rb[2], rb[1] + self._table_preview_height)
+                    painter.setPen(QPen(QColor(16, 185, 129), 1.5, Qt.DashLine))
+                    painter.drawRect(self._map_rect(pno, preview).translated(target_page.topLeft()))
+
         # Visualización interactiva para herramienta de tabla (TOOL_TABLE)
         if self._tool == TOOL_TABLE and self._hover_table_info is not None:
             pno, t, r, y_split, is_on_splitter = self._hover_table_info
@@ -992,6 +1112,8 @@ class PdfView(QAbstractScrollArea):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._relayout()
+        if hasattr(self, "table_toolbar"):
+            self._position_table_toolbar()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -1054,6 +1176,7 @@ class PdfView(QAbstractScrollArea):
                     self._selected_text = " ".join(w[4] for w in line_words).strip()
                     self._last_selection_target = (pno, line_r)
                     self.textSelected.emit(self._selected_text)
+                    self.close_table_toolbar()
                     self.popup.show_at(event.globalPosition().toPoint())
                     self.viewport().update()
                     event.accept()
@@ -1064,10 +1187,17 @@ class PdfView(QAbstractScrollArea):
             if self._tool == TOOL_TABLE:
                 pno, pt = self.viewport_to_page_point(event.position())
                 if pno is not None and pt is not None:
-                    if self._hover_table_info and self._hover_table_info[0] == pno:
-                        hpno, t, r, y_split, is_on_splitter = self._hover_table_info
-                    else:
-                        hpno, t, r, y_split, is_on_splitter = pno, None, None, pt.y, True
+                    info = self._table_at(pno, pt)
+                    if info is None or self._rotation or self.doc[pno].rotation:
+                        self.close_table_toolbar()
+                        event.accept()
+                        return
+                    hpno, t, r, y_split, is_on_splitter = info
+                    column = next((i for i, (a, b) in enumerate(zip(t["column_xs"], t["column_xs"][1:])) if a <= pt.x <= b), 0)
+                    self.select_table_cell(pno, t["index"], r["row_index"], column)
+                    if not is_on_splitter:
+                        event.accept()
+                        return
                     self._table_drag_active = True
                     self._table_drag_page = hpno
                     self._table_drag_table = t
@@ -1123,6 +1253,7 @@ class PdfView(QAbstractScrollArea):
                         self._selected_text = w[4].strip()
                         self._last_selection_target = (pno, wr)
                         self.textSelected.emit(self._selected_text)
+                        self.close_table_toolbar()
                         self.popup.show_at(event.globalPosition().toPoint())
                         self.viewport().update()
                         event.accept()
@@ -1259,43 +1390,14 @@ class PdfView(QAbstractScrollArea):
                     self.viewport().update()
 
             if self._tool == TOOL_TABLE:
-                new_table_hover = None
-                if pno is not None and pt is not None:
-                    if pno not in self._tables_cache:
-                        try:
-                            from . import operations as ops
-                            self._tables_cache[pno] = ops.detect_tables_on_page(self.doc[pno])
-                        except Exception:
-                            self._tables_cache[pno] = []
-                    tables = self._tables_cache.get(pno, [])
-                    for t in tables:
-                        tb = fitz.Rect(t["bbox"])
-                        exp_tb = fitz.Rect(tb.x0 - 10, tb.y0 - 10, tb.x1 + 10, tb.y1 + 10)
-                        if exp_tb.contains(pt):
-                            on_split = False
-                            for r in t["rows"]:
-                                ys = r["y_split"]
-                                if abs(pt.y - ys) <= 7.0 and (tb.x0 - 20 <= pt.x <= tb.x1 + 20):
-                                    new_table_hover = (pno, t, r, ys, True)
-                                    on_split = True
-                                    break
-                            if not on_split:
-                                for r in t["rows"]:
-                                    rb = fitz.Rect(r["bbox"])
-                                    if rb.contains(pt):
-                                        new_table_hover = (pno, t, r, r["y_split"], False)
-                                        break
-                            if new_table_hover:
-                                break
-
-                    if new_table_hover is None:
-                        new_table_hover = (pno, None, None, pt.y, True)
+                new_table_hover = self._table_at(pno, pt) if pno is not None and pt is not None and not self._rotation else None
 
                 if new_table_hover != self._hover_table_info:
                     self._hover_table_info = new_table_hover
                     self.viewport().update()
 
-                self.viewport().setCursor(QCursor(Qt.SizeVerCursor))
+                cursor = Qt.SizeVerCursor if new_table_hover and new_table_hover[4] else Qt.PointingHandCursor if new_table_hover else Qt.ArrowCursor
+                self.viewport().setCursor(QCursor(cursor))
         super().mouseMoveEvent(event)
 
     def _check_link_at(self, pno: int, pt: fitz.Point) -> bool:
@@ -1371,6 +1473,7 @@ class PdfView(QAbstractScrollArea):
                                 )
                                 self._last_selection_target = (pno, union_rect)
                                 self.textSelected.emit(self._selected_text)
+                                self.close_table_toolbar()
                                 self.popup.show_at(event.globalPosition().toPoint())
                             else:
                                 self._selection_line_rects.clear()
@@ -1378,7 +1481,14 @@ class PdfView(QAbstractScrollArea):
                                 self._selected_text = ""
                                 self.popup.hide()
                                 pt = fitz.Point(rect.x0, rect.y0)
-                                self._check_link_at(pno, pt)
+                                info = self._table_at(pno, pt) if dist < 5 else None
+                                if info and not self._rotation and not self.doc[pno].rotation:
+                                    _, table, row, _, _ = info
+                                    column = next((i for i, (a, b) in enumerate(zip(table["column_xs"], table["column_xs"][1:])) if a <= pt.x <= b), 0)
+                                    self.select_table_cell(pno, table["index"], row["row_index"], column)
+                                else:
+                                    self.close_table_toolbar()
+                                    self._check_link_at(pno, pt)
                         elif self._tool == TOOL_TEXT:
                             self.textRequested.emit(pno, rect)
                         elif self._tool == TOOL_REDACT:
@@ -1562,6 +1672,7 @@ class PdfView(QAbstractScrollArea):
                     return
 
         if key == Qt.Key_Escape:
+            self.close_table_toolbar()
             self._selection_line_rects.clear()
             self._selection_page = -1
             self._selected_text = ""

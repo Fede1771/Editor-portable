@@ -978,12 +978,12 @@ class ExpandTableDialog(_BaseDialog):
             "el contenido inferior hacia abajo para no tapar texto ni gráficos."
         )
         info_lbl.setWordWrap(True)
-        info_lbl.setStyleSheet("color: #4A5568; margin-bottom: 6px;")
+        info_lbl.setStyleSheet("margin-bottom: 6px;")
         self.outer.insertWidget(0, info_lbl)
 
         # Selección de modo
         self.btn_group = QButtonGroup(self)
-        self.r_auto = QRadioButton("Detección inteligente de tabla (PyMuPDF)")
+        self.r_auto = QRadioButton("Seleccionar una tabla detectada")
         self.r_manual = QRadioButton("Corte manual en coordenada vertical Y")
         self.btn_group.addButton(self.r_auto)
         self.btn_group.addButton(self.r_manual)
@@ -991,7 +991,7 @@ class ExpandTableDialog(_BaseDialog):
         self.combo_table = QComboBox()
         self.combo_row = QComboBox()
         self.lbl_row_info = QLabel()
-        self.lbl_row_info.setStyleSheet("color: #718096; font-size: 8.5pt;")
+        self.lbl_row_info.setStyleSheet("font-size: 8.5pt;")
 
         self.spin_y = QDoubleSpinBox()
         self.spin_y.setRange(1.0, max(1.0, self.page_h - 1.0))

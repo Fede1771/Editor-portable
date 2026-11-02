@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
+from .tools_panel import FlowLayout
 
 
 class TextSelectionPopup(QFrame):
@@ -11,6 +12,8 @@ class TextSelectionPopup(QFrame):
     copyRequested = Signal()
     highlightRequested = Signal()
     strikeoutRequested = Signal()
+    editRequested = Signal()
+    underlineRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -19,25 +22,25 @@ class TextSelectionPopup(QFrame):
         self.setObjectName("TextSelectionPopup")
         self.setStyleSheet("""
             QFrame#TextSelectionPopup {
-                background-color: #ffffff;
-                border: 1px solid #c8ccd0;
+                background-color: palette(window);
+                border: 1px solid palette(mid);
                 border-radius: 6px;
             }
             QPushButton {
                 background: transparent;
                 border: none;
                 border-radius: 4px;
-                color: #202124;
-                padding: 4px 8px;
-                font-size: 8.5pt;
+                color: palette(window-text);
+                padding: 7px 10px;
+                font-size: 9pt;
                 font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #f1f3f4;
+                background-color: palette(midlight);
             }
             QPushButton:pressed {
-                background-color: #e8eaed;
-                color: #1a73e8;
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
             }
         """)
 
@@ -48,9 +51,7 @@ class TextSelectionPopup(QFrame):
         shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 3, 4, 3)
-        layout.setSpacing(2)
+        layout = FlowLayout(self, margin=4, spacing=2)
 
         self.btn_copy = QPushButton("📋 Copiar")
         self.btn_copy.setCursor(QCursor(Qt.PointingHandCursor))
@@ -68,14 +69,24 @@ class TextSelectionPopup(QFrame):
         self.btn_so.clicked.connect(self._on_strikeout)
 
         layout.addWidget(self.btn_copy)
+        self.btn_edit = QPushButton("Editar texto")
+        self.btn_edit.setToolTip("Editar el texto seleccionado")
+        self.btn_edit.clicked.connect(lambda: (self.hide(), self.editRequested.emit()))
+        layout.addWidget(self.btn_edit)
         layout.addWidget(self.btn_hl)
+        self.btn_ul = QPushButton("Subrayar")
+        self.btn_ul.setToolTip("Subrayar la selección (Shift+U)")
+        self.btn_ul.clicked.connect(lambda: (self.hide(), self.underlineRequested.emit()))
+        layout.addWidget(self.btn_ul)
         layout.addWidget(self.btn_so)
 
         self.hide()
 
     def show_at(self, global_pos):
-        self.adjustSize()
         parent = self.parentWidget()
+        preferred = sum(self.layout().itemAt(i).sizeHint().width() + 2 for i in range(self.layout().count())) + 8
+        width = min(preferred, max(150, parent.width() - 12)) if parent else preferred
+        self.setFixedSize(width, self.layout().heightForWidth(width))
         if parent is not None:
             local_pos = parent.mapFromGlobal(global_pos)
             pw = max(self.width() + 12, parent.width())

@@ -278,10 +278,15 @@ def add_background(doc: fitz.Document, pages: list[int], color: tuple) -> None:
 def detect_tables_on_page(page: fitz.Page) -> list[dict]:
     """Detecta tablas en una página usando PyMuPDF y extrae metadata de filas y columnas."""
     try:
-        tabs = page.find_tables()
+        from .table_edit import visible_paths
+        paths = [p for p in visible_paths(page) if p.get("color") is not None and "s" in p["type"]]
+        options = {"paths": paths, "strategy": "lines_strict"}
+        # PyMuPDF 2 activa por defecto un análisis de maquetación que puede
+        # omitir filas vacías y bordes de tablas recién editadas.
+        if int(fitz.VersionBind.split(".")[0]) >= 2:
+            options["use_layout"] = False
+        tabs = page.find_tables(**options)
     except Exception:
-        return []
-    if not tabs or not tabs.tables:
         return []
     tables_data: list[dict] = []
     for t_idx, t in enumerate(tabs.tables):
@@ -314,6 +319,7 @@ def detect_tables_on_page(page: fitz.Page) -> list[dict]:
                 "bbox": (round(r.bbox[0], 1), round(r.bbox[1], 1), round(r.bbox[2], 1), round(r.bbox[3], 1)),
                 "y_split": y_split,
                 "preview": preview,
+                "cells": [tuple(c) if c else None for c in r.cells],
             })
 
         sorted_xs = sorted(col_xs)
@@ -330,6 +336,36 @@ def detect_tables_on_page(page: fitz.Page) -> list[dict]:
             "rows": rows_data,
             "column_xs": cleaned_xs,
         })
+    # PyMuPDF descarta tablas de una columna. Mantenerlas editables después
+    # de eliminar una columna aprovechando las celdas que ya calculó el detector.
+    groups = {}
+    for cell in getattr(tabs, "cells", []):
+        bounds = fitz.Rect(cell)
+        if any((fitz.Rect(t["bbox"]) + (-1, -1, 1, 1)).contains(bounds) for t in tables_data):
+            continue
+        key = (round(cell[0], 1), round(cell[2], 1))
+        groups.setdefault(key, []).append(tuple(cell))
+    for (x0, x1), cells in groups.items():
+        chains = []
+        for cell in sorted(set(cells), key=lambda c: c[1]):
+            if chains and abs(chains[-1][-1][3] - cell[1]) < 1:
+                chains[-1].append(cell)
+            else:
+                chains.append([cell])
+        for chain in chains:
+            bbox = (x0, chain[0][1], x1, chain[-1][3])
+            if not page.get_text("text", clip=fitz.Rect(bbox)).strip():
+                continue
+            rows = []
+            for i, cell in enumerate(chain):
+                preview = page.get_text("text", clip=fitz.Rect(cell)).strip().replace("\n", " ")
+                rows.append({"row_index": i, "bbox": cell, "y_split": cell[3],
+                             "preview": preview or f"Fila {i + 1}", "cells": [cell]})
+            tables_data.append({"index": 0, "bbox": bbox, "row_count": len(rows),
+                                "col_count": 1, "rows": rows, "column_xs": [x0, x1]})
+    tables_data.sort(key=lambda t: (t["bbox"][1], t["bbox"][0]))
+    for index, table in enumerate(tables_data):
+        table["index"] = index
     return tables_data
 
 
@@ -366,6 +402,19 @@ def expand_table_row(
 
     if not (0 < y_split < h):
         raise ValueError(f"La línea de corte ({y_split:.1f} pt) debe estar dentro de la altura de la página (0..{h:.1f} pt).")
+
+    # En tablas detectadas, ampliar la fila conservando su estilo y celdas combinadas.
+    if border_color == (0.0, 0.0, 0.0) and border_width == 1.0:
+        from .table_edit import edit_row
+        for table in detect_tables_on_page(page):
+            if table_bbox and abs(table["bbox"][1] - table_bbox[1]) > 3:
+                continue
+            for row in table["rows"]:
+                if abs(row["y_split"] - y_split) < 1:
+                    edit_row(doc, page_num, table, row["row_index"],
+                             height=row["bbox"][3] - row["bbox"][1] + delta_y,
+                             expand_page=expand_page, extend_borders=extend_borders)
+                    return
 
     new_h = h + delta_y if expand_page else h
     links = page.get_links()
