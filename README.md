@@ -1,14 +1,35 @@
 # 📄 Editor PDF Portable
 
 [![Windows](https://img.shields.io/badge/Plataforma-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
+[![Versión](https://img.shields.io/badge/Versi%C3%B3n-2.1.0-blue)](https://github.com/Fede1771/Editor-portable/releases/tag/2.1.0)
 [![Procesamiento local](https://img.shields.io/badge/Procesamiento-100%25%20Local-success)](#-seguridad-y-privacidad)
 [![Privacidad](https://img.shields.io/badge/Privacidad-Cero%20Huella-blue)](#-seguridad-y-privacidad)
-[![Sin Instalación](https://img.shields.io/badge/Portable-Sin%20instalaci%C3%B3n-informational)](#-inicio-r%C3%A1pido-para-usuarios)
+[![Pruebas](https://img.shields.io/badge/Pruebas-250%20aprobadas-success)](Proyecto/tests)
+[![Tamaño ZIP](https://img.shields.io/badge/Tama%C3%B1o%20ZIP-~192%20MB-informational)](https://github.com/Fede1771/Editor-portable/releases/latest/download/EditorPDFPortable.zip)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-green)](LICENSE)
 
 > **Editor de PDF de escritorio nativo para Windows: ligero, autónomo y privado.**
 >
 > Leé documentos con fluidez, editá texto directamente respetando su tipografía, organizá páginas, editá tablas de forma vectorial, aplicá OCR local sin conexión, censurá datos sensibles de forma irreversible, completá formularios interactivos, comprimí archivos y creá nuevos PDFs a partir de imágenes o documentos de Office. Todo se procesa **100% en tu equipo**, sin telemetría, sin suscripciones y sin enviar tus archivos a servidores externos.
+
+---
+
+## 📑 Tabla de Contenidos
+
+- [⬇️ Descarga del portable (Usuarios)](#️-descarga-del-portable-usuarios)
+- [💻 Requisitos del usuario final](#-requisitos-del-usuario-final)
+- [⚡ Inicio rápido para usuarios](#-inicio-rápido-para-usuarios)
+- [⚖️ ¿Por qué elegir Editor PDF Portable?](#️-por-qué-elegir-editor-pdf-portable)
+- [🧭 Navegación por la nueva barra compacta](#-navegación-por-la-nueva-barra-compacta)
+- [📊 Guía específica de edición de tablas](#-guía-específica-de-edición-de-tablas)
+- [🗂️ Guía de uso por tareas](#️-guía-de-uso-por-tareas)
+- [⌨️ Atajos de teclado verificados](#️-atajos-de-teclado-verificados)
+- [🛠️ Tecnologías y arquitectura (Herramientas utilizadas)](#️-tecnologías-y-arquitectura)
+- [⚠️ Limitaciones técnicas reales y consideraciones](#️-limitaciones-técnicas-reales-y-consideraciones)
+- [❓ Preguntas frecuentes (FAQ)](#-preguntas-frecuentes-faq)
+- [👨‍💻 Guía de desarrollo y compilación](#-guía-de-desarrollo-y-compilación)
+- [📚 Documentación técnica complementaria](#-documentación-técnica-complementaria)
+- [📄 Licencia](#-licencia)
 
 ---
 
@@ -41,6 +62,92 @@ No requiere instalación, permisos de administrador ni dependencias previas de P
    - Arrastrá cualquier archivo PDF directamente sobre la ventana.
    - Presioná `Ctrl + O` (o hacé clic en **Archivo → Abrir**) para seleccionar un archivo.
    - Presioná `Ctrl + N` para crear un PDF nuevo combinando imágenes o documentos.
+
+---
+
+## ⚖️ ¿Por qué elegir Editor PDF Portable?
+
+| Característica | Editor PDF Portable | Servicios Web / En la nube | Editores Comerciales Tradicionales |
+|---|---|---|---|
+| **Privacidad y seguridad** | **100% local**: tus archivos nunca salen de tu computadora ni se envían a servidores externos. | Suben tus documentos a servidores de terceros para procesarlos. | Suelen recopilar analíticas y telemetría de uso. |
+| **Edición de tablas** | **Motor vectorial contextual**: insertá o eliminá filas/columnas y ajustá altos en mm sin rasterizar a imagen. | Generalmente rompen el diseño de la tabla o no lo admiten. | Muy pocos editores permiten editar tablas vectoriales directamente. |
+| **Modelo y costo** | **Gratuito, libre y sin límites**: sin suscripciones, sin registros de usuario ni publicidad. | Planes con límites diarios de páginas, marcas de agua o pagos mensuales. | Licencias anuales o suscripciones costosas. |
+| **Instalación y portabilidad** | **100% Portable**: funciona desde cualquier carpeta o pendrive sin tocar el registro del sistema. | Requiere conexión a internet constante. | Instaladores pesados que exigen privilegios de administrador. |
+| **OCR (Reconocimiento)** | **Local y sin conexión**: motor Tesseract offline en español e inglés sin demoras de red. | Limitado por colas de espera en la nube y tamaño de archivo. | Módulos de pago adicionales o paquetes separados. |
+
+---
+
+## 🧭 Navegación por la nueva barra compacta
+
+Para maximizar el espacio útil de visualización del documento, la interfaz prescinde de cintas con múltiples pestañas permanentes que ocupaban espacio vertical valioso. En su lugar, utiliza dos franjas horizontales compactas y contextuales:
+
+### Esquema de la interfaz:
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Archivo ▾]   [↶ Deshacer] [↷ Rehacer]   [◀] 1 / 15 [▶]   [ 100% ▾ ]   [🔍 Herramientas] │ <- Franja de navegación
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ [🔤 Seleccionar] [✍ Editar texto] [⬛ Censurar] [🖼 Imagen] [🖐 Mano] [📐 Tablas ▾] ...   │ <- Herramientas frecuentes
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Franja superior de navegación y archivo:**
+   - Botón **Archivo** (abrir, guardar, imprimir, cerrar).
+   - Botones rápidos de **Deshacer** (`Ctrl + Z`) y **Rehacer** (`Ctrl + Y`).
+   - Controles de navegación de página (anterior, siguiente, selector numérico y total de páginas).
+   - Selector de zoom y ajuste de visualización (ancho o página completa).
+   - Botón **Herramientas** (`Ctrl + K`): Buscador universal de herramientas.
+2. **Franja inferior de herramientas frecuentes y grupos:**
+   - Accesos directos a las herramientas principales: **Seleccionar** (`V`), **Editar texto** (`T`), **Censurar** (`R`), **Imagen** (`I`), **Mano** (`H`) y el botón principal de **Tablas** (`B`).
+   - Menús agrupados:
+     - **Tablas:** Acceso directo a edición interactiva y diálogo de ampliación avanzada.
+     - **Anotar:** Resaltador, subrayador, tachador, notas adhesivas, lápiz libre y enlaces.
+     - **Páginas:** Rotación, extracción, eliminación, combinación e inserción de páginas en blanco.
+     - **Documento:** OCR local, compresión, formularios AcroForms, adjuntos y metadatos.
+3. **Diseño responsivo y adaptabilidad (`FlowLayout`):**
+   - Los controles se distribuyen de manera fluida según el ancho disponible de la ventana.
+   - En pantallas pequeñas o ventanas angostas, los botones secundarios pasan automáticamente a modo de solo icono, evitando menús de desborde engorrosos.
+4. **Buscador rápido de herramientas (`Ctrl + K`):**
+   - Permite encontrar cualquier funcionalidad del editor escribiendo su nombre (por ejemplo: `rotar`, `ocr`, `comprimir`, `tabla`, `censurar`).
+   - El buscador normaliza el texto ingresado, permitiendo encontrar funciones sin importar el uso de mayúsculas o acentos.
+
+---
+
+## 📊 Guía específica de edición de tablas
+
+El editor incluye un **motor de edición vectorial de tablas** (`app/table_edit.py`) diseñado para modificar la estructura de grillas existentes sin convertir la página en una imagen rasterizada ni alterar la identidad del objeto `Page`.
+
+### Flujo de trabajo paso a paso:
+
+```mermaid
+flowchart LR
+    A["1. Abrir PDF con tabla detectable"] --> B["2. Seleccionar una celda con 'V' o 'B'"]
+    B --> C["3. Identificar fila y columna en barra contextual"]
+    C --> D["4. Insertar / Eliminar filas o columnas"]
+    D --> E["5. Ajustar alto en mm y ver vista previa"]
+    E --> F["6. Aplicar cambios"]
+    F --> G["7. Deshacer / Rehacer (Ctrl+Z / Ctrl+Y)"]
+    G --> H["8. Guardar (Ctrl+S)"]
+```
+
+1. **Abrir el documento:** Abrí cualquier PDF que contenga una tabla estructurada con bordes vectoriales detectables.
+2. **Seleccionar una celda:**
+   - Con la herramienta de puntero habitual **Seleccionar** (`V`), hacé clic en cualquier celda de la tabla.
+   - También podés presionar la tecla `B` o hacer clic en el botón **Tablas** de la barra de herramientas.
+3. **Identificar la celda:** La celda seleccionada se resaltará en pantalla y se abrirá la barra contextual de tablas indicando el número de tabla, la fila y la columna seleccionada (por ejemplo: `Tabla 1 · Fila 2 · Columna 3`).
+4. **Insertar o eliminar elementos:**
+   - **Insertar fila debajo / arriba:** El menú desplegable del botón de filas permite agregar una nueva fila vacía. La fila nueva hereda automáticamente el estilo de los bordes, el color de relleno y la estructura de columnas de la fila adyacente.
+   - **Insertar columna a la derecha / izquierda:** Agrega una columna vacía redistribuyendo de forma proporcional el ancho de la tabla, respetando los encabezados combinados horizontalmente.
+   - **Eliminar fila seleccionada:** Quita la fila y su contenido, desplazando hacia arriba el contenido inferior del documento para cerrar el espacio vacío.
+   - **Eliminar columna seleccionada:** Remueve las celdas de la columna y redistribuye las restantes dentro del ancho original de la tabla.
+5. **Ajustar el alto de la fila con vista previa:**
+   - En el control numérico **Alto (mm)**, ingresá la medida deseada. A medida que modificás el valor, se muestra una **vista previa en tiempo real** sobre la página indicando cómo quedará la fila antes de confirmar.
+   - **Arrastre interactivo con el mouse:** También podés posar el cursor sobre el borde inferior de la fila seleccionada (el cursor cambiará a flecha vertical de redimensionado `↕`) y arrastrarlo hacia abajo para estirar la fila elásticamente.
+6. **Aplicar los cambios:** Hacé clic en **Aplicar** para consolidar la modificación vectorial en la página.
+7. **Deshacer y Rehacer:** Si cometés un error, podés deshacer inmediatamente con `Ctrl + Z` (o el botón *Deshacer* de la barra de tabla) y rehacer con `Ctrl + Y`. Cada operación crea un snapshot en el historial de la pestaña.
+8. **Guardar el documento:** Presioná `Ctrl + S` para guardar las modificaciones o `Ctrl + Shift + S` para generar una copia nueva.
+
+### Ampliación avanzada de tablas:
+Si necesitás estirar una página completa o realizar un corte por coordenadas verticales arbitrarias $Y$, podés acceder al menú **Tablas → Ampliación avanzada…**, donde podés configurar el incremento en puntos y definir si la altura total de la página debe expandirse para conservar márgenes.
 
 ---
 
@@ -101,71 +208,6 @@ No requiere instalación, permisos de administrador ni dependencias previas de P
 
 ---
 
-## 📊 Guía específica de edición de tablas
-
-El editor incluye un **motor de edición vectorial de tablas** (`app/table_edit.py`) diseñado para modificar la estructura de grillas existentes sin convertir la página en una imagen rasterizada ni alterar la identidad del objeto `Page`.
-
-### Flujo de trabajo paso a paso:
-
-```mermaid
-flowchart LR
-    A["1. Abrir PDF con tabla detectable"] --> B["2. Seleccionar una celda con 'V' o 'B'"]
-    B --> C["3. Identificar fila y columna en barra contextual"]
-    C --> D["4. Insertar / Eliminar filas o columnas"]
-    D --> E["5. Ajustar alto en mm y ver vista previa"]
-    E --> F["6. Aplicar cambios"]
-    F --> G["7. Deshacer / Rehacer (Ctrl+Z / Ctrl+Y)"]
-    G --> H["8. Guardar (Ctrl+S)"]
-```
-
-1. **Abrir el documento:** Abrí cualquier PDF que contenga una tabla estructurada con bordes vectoriales detectables.
-2. **Seleccionar una celda:**
-   - Con la herramienta de puntero habitual **Seleccionar** (`V`), hacé clic en cualquier celda de la tabla.
-   - También podés presionar la tecla `B` o hacer clic en el botón **Tablas** de la barra de herramientas.
-3. **Identificar la celda:** La celda seleccionada se resaltará en pantalla y se abrirá la barra contextual de tablas indicando el número de tabla, la fila y la columna seleccionada (por ejemplo: `Tabla 1 · Fila 2 · Columna 3`).
-4. **Insertar o eliminar elementos:**
-   - **Insertar fila debajo / arriba:** El menú desplegable del botón de filas permite agregar una nueva fila vacía. La fila nueva hereda automáticamente el estilo de los bordes, el color de relleno y la estructura de columnas de la fila adyacente.
-   - **Insertar columna a la derecha / izquierda:** Agrega una columna vacía redistribuyendo de forma proporcional el ancho de la tabla, respetando los encabezados combinados horizontalmente.
-   - **Eliminar fila seleccionada:** Quita la fila y su contenido, desplazando hacia arriba el contenido inferior del documento para cerrar el espacio vacío.
-   - **Eliminar columna seleccionada:** Remueve las celdas de la columna y redistribuye las restantes dentro del ancho original de la tabla.
-5. **Ajustar el alto de la fila con vista previa:**
-   - En el control numérico **Alto (mm)**, ingresá la medida deseada. A medida que modificás el valor, se muestra una **vista previa en tiempo real** sobre la página indicando cómo quedará la fila antes de confirmar.
-   - **Arrastre interactivo con el mouse:** También podés posar el cursor sobre el borde inferior de la fila seleccionada (el cursor cambiará a flecha vertical de redimensionado `↕`) y arrastrarlo hacia abajo para estirar la fila elásticamente.
-6. **Aplicar los cambios:** Hacé clic en **Aplicar** para consolidar la modificación vectorial en la página.
-7. **Deshacer y Rehacer:** Si cometés un error, podés deshacer inmediatamente con `Ctrl + Z` (o el botón *Deshacer* de la barra de tabla) y rehacer con `Ctrl + Y`. Cada operación crea un snapshot en el historial de la pestaña.
-8. **Guardar el documento:** Presioná `Ctrl + S` para guardar las modificaciones o `Ctrl + Shift + S` para generar una copia nueva.
-
-### Ampliación avanzada de tablas:
-Si necesitás estirar una página completa o realizar un corte por coordenadas verticales arbitrarias $Y$, podés acceder al menú **Tablas → Ampliación avanzada…**, donde podés configurar el incremento en puntos y definir si la altura total de la página debe expandirse para conservar márgenes.
-
----
-
-## 🧭 Navegación por la nueva barra compacta
-
-Para maximizar el espacio útil de visualización del documento, la interfaz prescinde de cintas con múltiples pestañas permanentes que ocupaban espacio vertical valioso. En su lugar, utiliza dos franjas horizontales compactas y contextuales:
-
-1. **Franja superior de navegación y archivo:**
-   - Botón **Archivo** (abrir, guardar, imprimir, cerrar).
-   - Botones rápidos de **Deshacer** (`Ctrl + Z`) y **Rehacer** (`Ctrl + Y`).
-   - Controles de navegación de página (anterior, siguiente, selector numérico y total de páginas).
-   - Selector de zoom y ajuste de visualización (ancho o página completa).
-   - Botón **Herramientas** (`Ctrl + K`): Buscador universal de herramientas.
-2. **Franja inferior de herramientas frecuentes y grupos:**
-   - Accesos directos a las herramientas principales: **Seleccionar** (`V`), **Editar texto** (`T`), **Censurar** (`R`), **Imagen** (`I`), **Mano** (`H`) y el botón principal de **Tablas** (`B`).
-   - Menús agrupados:
-     - **Tablas:** Acceso directo a edición interactiva y diálogo de ampliación avanzada.
-     - **Anotar:** Resaltador, subrayador, tachador, notas adhesivas, lápiz libre y enlaces.
-     - **Páginas:** Rotación, extracción, eliminación, combinación e inserción de páginas en blanco.
-     - **Documento:** OCR local, compresión, formularios AcroForms, adjuntos y metadatos.
-3. **Diseño responsivo y adaptabilidad (`FlowLayout`):**
-   - Los controles se distribuyen de manera fluida según el ancho disponible de la ventana.
-   - En pantallas pequeñas o ventanas angostas, los botones secundarios pasan automáticamente a modo de solo icono, evitando menús de desborde engorrosos.
-4. **Buscador rápido de herramientas (`Ctrl + K`):**
-   - Permite encontrar cualquier funcionalidad del editor escribiendo su nombre (por ejemplo: `rotar`, `ocr`, `comprimir`, `tabla`, `censurar`).
-   - El buscador normaliza el texto ingresado, permitiendo encontrar funciones sin importar el uso de mayúsculas o acentos.
-
----
-
 ## ⌨️ Atajos de teclado verificados
 
 | Atajo | Acción | Contexto |
@@ -218,7 +260,7 @@ graph TD
     Main --> PrintSubsystem["Impresión de Windows (win32print)"]
 ```
 
-### Componentes clave del sistema:
+### Componentes clave del sistema y herramientas:
 - **PySide6 6.12.0 (Qt 6):** Interfaz gráfica nativa con controles estilizados mediante paletas del sistema, renderizado de alta densidad (HiDPI) y distribución adaptativa de controles.
 - **PyMuPDF 2.0 (Motor Artifex MuPDF):** Motor principal de renderizado, análisis vectorial y composición de páginas mediante primitivas vectoriales (`show_pdf_page`), evitando la degradación de imagen al editar.
 - **pypdf 6.21.2:** Biblioteca auxiliar utilizada para inspección de bajo nivel y operaciones estructurales complementarias.
@@ -246,6 +288,24 @@ Para mantener total transparencia técnica y evitar expectativas no sustentadas 
 6. **Redistribución de columnas:** Al insertar o eliminar columnas, el contenido de las celdas restantes se escala horizontalmente para conservar el ancho global de la tabla. Esto no constituye un motor universal de maquetación tipográfica (reflujo semántico de texto); textos muy extensos en columnas reducidas podrían comprimirse visualmente.
 7. **Elementos interactivos en columnas:** Si la tabla contiene notas adhesivas, enlaces o campos de formulario interactivos incrustados en su interior que no puedan reubicarse con total precisión geométrica, la redistribución de columnas se bloqueará para proteger dichos elementos.
 8. **Edición vs. Censura:** Eliminar una fila o columna es una operación de maquetación y diseño; no debe confundirse con la herramienta de **Censura destructiva** permanente (`R`), la cual es la única diseñada para purgar datos confidenciales garantizando la no recuperabilidad de los datos.
+
+---
+
+## ❓ Preguntas frecuentes (FAQ)
+
+### ¿Por qué Windows SmartScreen muestra una advertencia al abrir el portable por primera vez?
+Es el comportamiento habitual de Windows ante aplicaciones portables nuevas o de código abierto que no cuentan con un certificado comercial corporativo pago. El ejecutable está libre de virus y procesa todo 100% en local. Para abrirlo:
+1. Hacé clic en **Más información** en el cuadro de SmartScreen.
+2. Hacé clic en el botón **Ejecutar de todas formas**.
+
+### ¿El programa deja archivos en mi computadora o toca el registro de Windows?
+No. El editor es **estrictamente portable**. No crea claves en el Registro de Windows ni instala servicios en segundo plano. Los únicos archivos temporales generados durante conversiones se guardan en la carpeta temporal aislada y se limpian al cerrar la aplicación. Podés usar el programa directamente desde un pendrive en cualquier computadora.
+
+### ¿Cómo sé si la tabla de mi PDF es editable con la nueva herramienta?
+Si al pasar el ratón podés seleccionar el texto de las celdas individualmente y los bordes son líneas vectoriales limpias, el motor la detectará automáticamente al presionar `B` o hacer clic con `V`. Si el documento es una hoja escaneada o una foto donde todo es una imagen fija, primero debés aplicar **Documento → OCR** para digitalizar el contenido.
+
+### ¿Necesito tener Microsoft Office instalado para usar el editor?
+No. Todas las funciones de lectura, edición de texto, maquetación de tablas, anotaciones, OCR, censura, compresión, formularios y exportación a imágenes funcionan de forma autónoma. Office solo es necesario si deseás crear un PDF directamente a partir de archivos `.docx`, `.xlsx` o `.pptx` mediante `Ctrl + N`.
 
 ---
 
