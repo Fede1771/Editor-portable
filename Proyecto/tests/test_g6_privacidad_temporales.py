@@ -84,29 +84,6 @@ def test_h26_sweep_orphaned_temps_skips_active_pid(tmp_path, monkeypatch):
     assert unowned.exists(), "No borrar carpetas desconocidas por su nombre"
 
 
-# ---------------------------------------------------------------------------
-# H27: Salida Office temporal y aislada fuera de DATA_DIR
-# ---------------------------------------------------------------------------
-def test_h27_office_conversion_uses_isolated_output_and_preserves_source(tmp_path, monkeypatch):
-    """Office recibe una salida temporal aislada y no modifica el archivo fuente."""
-    from app import office365
-    calls = []
-    def fake_run(operation, source, target, **kwargs):
-        calls.append((operation, source, target))
-        assert Path(target).parent == tmp_path / "out"
-        assert target.endswith(".tmp.pdf")
-        with fitz.open() as document:
-            document.new_page()
-            document.save(target)
-    monkeypatch.setattr(office365, "run_office", fake_run)
-    source = tmp_path / "documento.docx"
-    source.write_bytes(b"DUMMY")
-    output = creation.office_to_pdf_file(str(source), str(tmp_path / "out"))
-    assert os.path.isfile(output)
-    assert source.read_bytes() == b"DUMMY"
-    assert len(calls) == 1 and calls[0][0] == "word_pdf"
-    assert not Path(calls[0][2]).exists()
-
 
 # ---------------------------------------------------------------------------
 # H46: Transición a modo privado migra snapshots de disco a RAM y los borra

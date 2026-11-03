@@ -99,7 +99,7 @@ El EXE y ZIP se regeneraron después de C01–C04. La autoprueba de ese ejecutab
 
 ## Integración posterior con Microsoft 365
 
-El 23/10/2026 se reemplazó LibreOffice por la automatización local de Microsoft 365 para Office → PDF. PDF → Excel utiliza Power Query; PDF → Word reconstruye un DOCX intermedio con pdf2docx y Word genera el archivo final. La [guía técnica](../MICROSOFT365.md) detalla el aislamiento de procesos, la escritura atómica y las limitaciones.
+El 23/10/2026 se reemplazó LibreOffice por la automatización local de Microsoft 365 para Office → PDF. PDF → Excel utiliza Power Query; PDF → Word reconstruye un DOCX intermedio con pdf2docx y Word genera el archivo final. Posteriormente se desacopló la dependencia de software externo de oficina para garantizar que la aplicación funcione de forma totalmente autónoma, sin requerir privilegios de administrador.
 
 Validación de esta integración: **204 pruebas aprobadas, salida 0**, incluyendo 11 casos nuevos de rutas nativas, preservación del destino ante fallos, snapshot de cambios sin guardar, fórmulas como texto, timeout, identidad de procesos, escape de Power Query, PowerPoint ya abierto y exclusión mutua. El ejecutable regenerado aprobó **8/8 comprobaciones, salida 0**. Las cinco rutas también se probaron con las aplicaciones reales de Microsoft 365; se reabrieron sus resultados con lectores independientes. El XLSX de prueba no conserva fórmulas, consultas, conexiones ni enlaces externos. El ZIP incluye el mismo EXE validado mediante SHA-256.
 

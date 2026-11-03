@@ -66,8 +66,7 @@ class MainWindow(QMainWindow):
         self.welcome = WelcomeWidget(self)
         self.welcome.openFileRequested.connect(self.open_dialog)
         self.welcome.openRecentRequested.connect(self.open_file)
-        self.welcome.createFromFilesRequested.connect(self.create_from_files)
-        self.welcome.combineRequested.connect(lambda: self._create_from_dialog([]))
+        self.welcome.combineRequested.connect(self.combine_dialog)
 
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
@@ -114,14 +113,9 @@ class MainWindow(QMainWindow):
         self.a_close = self._act("Cerrar pestaña", lambda: self.close_tab(self.tabs.currentIndex()), "Ctrl+W")
         self.a_quit = self._act("Salir", self.close, "Ctrl+Q")
 
-        # Crear PDF
-        self.a_new_files = self._act("Crear PDF desde archivos…", self.create_from_files, "Ctrl+N",
-                                     "PDF, imágenes, Word/Excel/PowerPoint, HTML o texto")
-        self.a_combine = self._act("Combinar archivos…", lambda: self._create_from_dialog([]), "Ctrl+Shift+N",
-                                   "Unir varios archivos en un solo PDF")
-        self.a_clip = self._act("Crear PDF desde el portapapeles", self.create_from_clipboard)
-        self.a_scan = self._act("Crear PDF desde el escáner…", self.create_from_scanner)
-        self.a_blank_doc = self._act("Documento en blanco (A4)", self.create_blank)
+        # Combinar PDF
+        self.a_combine = self._act("Combinar archivos…", self.combine_dialog, "Ctrl+Shift+N",
+                                   "Unir varios archivos PDF o imágenes en un solo documento")
         self.a_undo = self._act("Deshacer", lambda: self._tab_do("undo"), "Ctrl+Z")
         self.a_redo = self._act("Rehacer", lambda: self._tab_do("redo"), "Ctrl+Y")
         self.a_copy = self._act("Copiar", self._copy_current_selection, "Ctrl+C", "Copiar texto seleccionado al portapapeles")
@@ -324,12 +318,9 @@ class MainWindow(QMainWindow):
 
         # Acciones de Archivo
         menu.addAction(self.a_open)
+        menu.addAction(self.a_combine)
         self.menu_recents = menu.addMenu("🕒 Documentos recientes")
         self._update_recent_menu()
-
-        sub_create = menu.addMenu("📄 Crear PDF")
-        for a in (self.a_new_files, self.a_combine, self.a_clip, self.a_scan, self.a_blank_doc):
-            sub_create.addAction(a)
 
         menu.addSeparator()
         menu.addAction(self.a_save)
@@ -395,7 +386,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_zoom_in, self.a_zoom_out, self.a_fit_w, self.a_fit_p, self.a_rot_l,
                   self.a_rot_r, self.a_side, self.a_find, self.a_find_next, self.a_find_prev,
                   self.a_open, self.a_save, self.a_save_as, self.a_print, self.a_close, self.a_quit,
-                  self.a_new_files, self.a_combine, self.a_compress,
+                  self.a_combine, self.a_compress,
                   self.a_undo, self.a_redo, self.a_copy, self.a_pg_rot_l, self.a_pg_rot_r,
                   self.a_move_up, self.a_move_down,
                   self.a_tool_pan, self.a_tool_select, self.a_tool_text,
@@ -1370,86 +1361,29 @@ class MainWindow(QMainWindow):
             )
             self.status_msg.setText("Historial y temporales eliminados con éxito")
 
-    # ---------------------------------------------------------------- crear PDF
-    def create_from_files(self):
-        init_dir = self._default_open_dir()
-        paths, _ = QFileDialog.getOpenFileNames(self, "Crear PDF desde archivos", init_dir, creation.file_filter())
-        if paths:
-            self._create_from_dialog(paths)
+    # ------------------------------------------------------------- combinar PDF
+    def combine_dialog(self, files: list[str] | None = None):
+        self._create_from_dialog(files or [])
 
     def _create_from_dialog(self, files: list[str]):
         dlg = CombineDialog(files, self)
         if dlg.exec() != QDialog.Accepted:
             return
         paths = dlg.files()
-        office = [p for p in paths if creation.classify(p) == "office"]
-        tmp = TempManager.create_temp_dir(prefix="editorpdf_create_")
+        if not paths:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            converted: dict[str, str] = {}
-            if office:
-                converted = run_blocking(
-                    self, "Convirtiendo documentos con Microsoft 365…\n(la primera vez puede tardar)",
-                    lambda: creation.convert_office_files(office, tmp))
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                doc = creation.build_pdf(paths, dlg.mode(), dlg.bookmarks.isChecked(), converted)
-            finally:
-                QApplication.restoreOverrideCursor()
+            doc = creation.build_pdf(paths, dlg.mode(), dlg.bookmarks.isChecked())
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "No se pudo crear el PDF", str(exc))
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "No se pudieron combinar los archivos", str(exc))
             return
         finally:
-            TempManager.cleanup_path(tmp)
+            QApplication.restoreOverrideCursor()
         name = os.path.splitext(os.path.basename(paths[0]))[0] if len(paths) == 1 else "combinado"
         self._add_tab("", doc, save_as_only=True, modified=True, suggested=f"{name}.pdf")
-        self.status_msg.setText(f"PDF creado con {doc.page_count} páginas. Guardalo con Ctrl+S.")
-
-    def create_from_clipboard(self):
-        image = QApplication.clipboard().image()
-        if image.isNull():
-            QMessageBox.information(self, "Portapapeles", "No hay ninguna imagen en el portapapeles.")
-            return
-        tmp = TempManager.create_temp_dir(prefix="editorpdf_clipboard_")
-        try:
-            path = os.path.join(tmp, "portapapeles.png")
-            image.save(path, "PNG")
-            doc = creation.images_to_pdf([path], "image")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "No se pudo crear el PDF", str(exc))
-            return
-        finally:
-            TempManager.cleanup_path(tmp)
-        self._add_tab("", doc, save_as_only=True, modified=True, suggested="portapapeles.pdf")
-
-    def create_from_scanner(self):
-        tmp = TempManager.create_temp_dir(prefix="editorpdf_scan_")
-        try:
-            images: list[str] = []
-            while True:
-                try:
-                    path = run_blocking(self, "Esperando al escáner…",
-                                        lambda n=len(images) + 1: creation.scan_one_page(tmp, n))
-                except Exception as exc:  # noqa: BLE001
-                    QMessageBox.warning(self, "Escáner", str(exc))
-                    break
-                if not path:
-                    break
-                images.append(path)
-                if QMessageBox.question(
-                        self, "Escáner", f"Página {len(images)} escaneada.\n¿Escanear otra página?") != QMessageBox.Yes:
-                    break
-            if images:
-                try:
-                    doc = creation.images_to_pdf(images, "a4")
-                except Exception as exc:  # noqa: BLE001
-                    QMessageBox.warning(self, "No se pudo crear el PDF", str(exc))
-                    return
-                self._add_tab("", doc, save_as_only=True, modified=True, suggested="escaneo.pdf")
-        finally:
-            TempManager.cleanup_path(tmp)
-
-    def create_blank(self):
-        self._add_tab("", creation.blank_document(1), save_as_only=True, modified=True, suggested="documento.pdf")
+        self.status_msg.setText(f"PDF combinado con {doc.page_count} páginas. Guardalo con Ctrl+S.")
 
     # --------------------------------------------------- operaciones de páginas
     def _edit(self, tab: DocTab, fn, message: str, select=None, goto=None) -> bool:

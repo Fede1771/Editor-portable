@@ -245,10 +245,10 @@ class SplitDialog(_BaseDialog):
 
 
 class CombineDialog(_BaseDialog):
-    """Lista ordenable de archivos para crear o combinar un PDF."""
+    """Lista ordenable de archivos para combinar en un PDF."""
 
     def __init__(self, files: list[str] | None = None, parent=None):
-        super().__init__("Crear o combinar PDF desde archivos", parent)
+        super().__init__("Combinar archivos en un único PDF", parent)
         self.setMinimumSize(560, 460)
         from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem
         self._Item = QListWidgetItem
@@ -256,8 +256,8 @@ class CombineDialog(_BaseDialog):
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list.setDragDropMode(QAbstractItemView.InternalMove)
         self.list.setDefaultDropAction(Qt.MoveAction)
-        self.outer.insertWidget(0, QLabel("Archivos (PDF, imágenes, Word/Excel/PowerPoint, HTML o texto). "
-                                         "Arrastrá para cambiar el orden:"))
+        self.outer.insertWidget(0, QLabel("Archivos a combinar (PDF o imágenes). "
+                                          "Arrastrá para cambiar el orden:"))
         self.outer.insertWidget(1, self.list, 1)
 
         row = QHBoxLayout()

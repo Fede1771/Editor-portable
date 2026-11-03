@@ -108,8 +108,6 @@ class WelcomeWidget(QWidget):
 
     openFileRequested = Signal()
     openRecentRequested = Signal(str)
-    createFromFilesRequested = Signal()
-    blankDocRequested = Signal()
     combineRequested = Signal()
 
     def __init__(self, parent=None):
@@ -182,12 +180,12 @@ class WelcomeWidget(QWidget):
         self.btn_open.clicked.connect(self.openFileRequested.emit)
         btn_row.addWidget(self.btn_open)
 
-        self.btn_create_files = QPushButton("📑  Crear PDF desde archivos…")
-        self.btn_create_files.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_create_files.setFixedHeight(34)
-        self.btn_create_files.setToolTip("Crear PDF desde archivos (Ctrl+N)")
-        self.btn_create_files.clicked.connect(self.createFromFilesRequested.emit)
-        btn_row.addWidget(self.btn_create_files)
+        self.btn_combine = QPushButton("📑  Combinar archivos…")
+        self.btn_combine.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_combine.setFixedHeight(34)
+        self.btn_combine.setToolTip("Unir varios archivos PDF o imágenes en un solo documento (Ctrl+Shift+N)")
+        self.btn_combine.clicked.connect(self.combineRequested.emit)
+        btn_row.addWidget(self.btn_combine)
 
         drop_layout.addLayout(btn_row)
         card_layout.addWidget(drop_box)

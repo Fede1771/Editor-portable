@@ -1,12 +1,10 @@
-"""Crear PDF (fase 3): imágenes, Office (Microsoft 365), HTML/texto, combinar y escáner."""
+"""Combinación de archivos PDF e imágenes en un único documento."""
 from __future__ import annotations
 
 import html as html_lib
 import io
 import os
 import pathlib
-import subprocess
-import tempfile
 import sys
 
 import pymupdf as fitz
@@ -34,9 +32,6 @@ def _resolve_data_dir() -> str:
 DATA_DIR = _resolve_data_dir()
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".jpe", ".bmp", ".gif", ".tif", ".tiff", ".jp2"}
-OFFICE_EXTS = {".doc", ".docx", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp"}
-HTML_EXTS = {".html", ".htm"}
-TEXT_EXTS = {".txt", ".log", ".csv", ".md"}
 
 IMAGE_MODES = {
     "Tamaño de la imagen": "image",
@@ -48,8 +43,8 @@ MAX_IMAGE_PAGE = 1191.0          # lado máximo (pt) de una página creada a par
 
 
 def file_filter() -> str:
-    exts = sorted(IMAGE_EXTS | OFFICE_EXTS | HTML_EXTS | TEXT_EXTS | {".pdf"})
-    return "Archivos compatibles (" + " ".join(f"*{e}" for e in exts) + ");;Todos los archivos (*)"
+    exts = sorted(IMAGE_EXTS | {".pdf"})
+    return "Archivos compatibles (" + " ".join(f"*{e}" for e in exts) + ");;Archivos PDF (*.pdf);;Imágenes (*.png *.jpg *.jpeg *.bmp *.tiff);;Todos los archivos (*)"
 
 
 def classify(path: str) -> str | None:
@@ -58,12 +53,6 @@ def classify(path: str) -> str | None:
         return "pdf"
     if ext in IMAGE_EXTS:
         return "image"
-    if ext in OFFICE_EXTS:
-        return "office"
-    if ext in HTML_EXTS:
-        return "html"
-    if ext in TEXT_EXTS:
-        return "text"
     return None
 
 
@@ -104,7 +93,7 @@ def images_to_pdf(paths: list[str], mode: str = "image") -> fitz.Document:
     return doc
 
 
-# ------------------------------------------------------------------ HTML / texto
+# ------------------------------------------------------------------ HTML / texto (auxiliares)
 def _read_text(path: str) -> str:
     with open(path, "rb") as fh:
         raw = fh.read()
@@ -146,7 +135,6 @@ def html_to_pdf(html: str, base_dir: str | None = None, css: str = "",
 
             if more:
                 filled_rect = fitz.Rect(filled)
-                # Si place() no logra acomodar el elemento (filled muy pequeño o idéntico repetidamente sin llenar la página)
                 if prev_filled is not None and filled_rect == prev_filled and filled_rect.height < where.height * 0.25:
                     no_progress_streak += 1
                     if no_progress_streak >= 2:
@@ -176,55 +164,11 @@ def htmlfile_to_pdf(path: str) -> fitz.Document:
     return html_to_pdf(_read_text(path), base_dir=os.path.dirname(os.path.abspath(path)))
 
 
-# ----------------------------------------------------------------------- Office
-def office_to_pdf_file(path: str, out_dir: str, timeout: int = 240) -> str:
-    """Exporta con Word, Excel o PowerPoint de Microsoft 365; salida atómica."""
-    from .office365 import run_office
-    from .conversion import _atomic_write_target
-    extension = pathlib.Path(path).suffix.lower()
-    if extension in {".doc", ".docx", ".odt", ".rtf"}:
-        operation = "word_pdf"
-    elif extension in {".xls", ".xlsx", ".ods"}:
-        operation = "excel_pdf"
-    elif extension in {".ppt", ".pptx", ".odp"}:
-        operation = "powerpoint_pdf"
-    else:
-        raise ValueError("Formato de Office no compatible.")
-    os.makedirs(out_dir, exist_ok=True)
-    output = os.path.join(out_dir, pathlib.Path(path).stem + ".pdf")
-    def verify(target):
-        # Office se ejecuta desde un hilo receptor; no usar PyMuPDF en él.
-        # El archivo queda cerrado incluso si el parser rechaza una salida rota.
-        from pypdf import PdfReader
-        with open(target, "rb") as stream:
-            check = PdfReader(stream, strict=True)
-            if check.is_encrypted or len(check.pages) < 1:
-                raise ValueError("Microsoft 365 no generó un PDF válido.")
-    _atomic_write_target(output, ".tmp.pdf",
-                         lambda target: run_office(operation, path, target, timeout=timeout), verify)
-    return output
-
-
-def convert_office_files(paths: list[str], out_dir: str) -> dict[str, str]:
-    """Convierte (en bloque) los archivos de Office de la lista. Apto para un hilo en segundo plano."""
-    from .privacy import TempManager
-
-    result: dict[str, str] = {}
-    for p in paths:
-        if classify(p) == "office":
-            sub = tempfile.mkdtemp(dir=out_dir)
-            TempManager.register(sub)
-            result[p] = office_to_pdf_file(p, sub)
-    return result
-
-
 # --------------------------------------------------------------------- combinar
-def build_pdf(paths: list[str], image_mode: str = "image", bookmarks: bool = True,
-              converted: dict[str, str] | None = None) -> fitz.Document:
-    """Une archivos de distintos tipos en un único PDF (en el orden dado)."""
+def build_pdf(paths: list[str], image_mode: str = "image", bookmarks: bool = True) -> fitz.Document:
+    """Une archivos PDF e imágenes en un único PDF (en el orden dado)."""
     if not paths:
         raise ValueError("No hay archivos para combinar.")
-    converted = converted or {}
     out = fitz.open()
     toc: list[list] = []
     try:
@@ -239,14 +183,6 @@ def build_pdf(paths: list[str], image_mode: str = "image", bookmarks: bool = Tru
                     raise ValueError(f"«{os.path.basename(p)}» está protegido con contraseña.")
             elif kind == "image":
                 part = images_to_pdf([p], image_mode)
-            elif kind == "office":
-                if p not in converted:
-                    raise ValueError(f"«{os.path.basename(p)}» no fue convertido.")
-                part = fitz.open(converted[p])
-            elif kind == "html":
-                part = htmlfile_to_pdf(p)
-            elif kind == "text":
-                part = text_to_pdf(p)
             else:
                 raise ValueError(f"Tipo de archivo no compatible: {os.path.basename(p)}")
             try:
@@ -269,31 +205,3 @@ def blank_document(pages: int = 1, size: str = "a4") -> fitz.Document:
     for _ in range(max(1, pages)):
         doc.new_page(width=rect.width, height=rect.height)
     return doc
-
-
-# ----------------------------------------------------------------------- escáner
-_SCAN_SCRIPT = r"""
-$ErrorActionPreference = 'Stop'
-$dlg = New-Object -ComObject WIA.CommonDialog
-$img = $dlg.ShowAcquireImage(1, 1, 0x20000, '{B96B3CAF-0728-11D3-9D7B-0000F81EF32E}', $false, $true, $false)
-if ($img -ne $null) {
-    $img.SaveFile($args[0])
-    Write-Output $args[0]
-}
-"""
-
-
-def scan_one_page(out_dir: str, index: int) -> str | None:
-    """Abre el diálogo de escaneo de Windows (WIA). Devuelve la imagen o None si se cancela."""
-    script = os.path.join(out_dir, "scan.ps1")
-    with open(script, "w", encoding="utf-8") as fh:
-        fh.write(_SCAN_SCRIPT)
-    target = os.path.join(out_dir, f"scan_{index:03d}.png")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", script, target],
-        capture_output=True, text=True, creationflags=flags, timeout=900)
-    if proc.returncode != 0:
-        msg = (proc.stderr or proc.stdout).strip().splitlines()
-        raise RuntimeError("No se pudo usar el escáner: " + (msg[0] if msg else "error desconocido"))
-    return target if os.path.isfile(target) else None

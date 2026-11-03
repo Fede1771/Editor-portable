@@ -98,4 +98,4 @@ Los informes históricos conservan su contenido original; sus referencias a ruta
 
 ## Comprobación del traslado
 
-El 23/10/2026 se aprobaron las 193 pruebas con salida 0 desde la nueva ubicación. La compilación desde otra carpeta generó el programa y el ZIP en `Programa/`. Se probó el acceso de la raíz con la autoprueba del portable: procesos independientes, Word, Excel, imágenes, compresión cifrada y OCR. El ZIP conserva el mismo EXE y acceso verificados. También se comprobó que las pruebas mantienen su caché dentro de `Proyecto/`.
+El 23/10/2026 se aprobaron las 193 pruebas con salida 0 desde la nueva ubicación. La compilación desde otra carpeta generó el programa y el ZIP en `Programa/`. Se probó el acceso de la raíz con la autoprueba del portable: procesos independientes, imágenes, compresión cifrada y OCR. El ZIP conserva el mismo EXE y acceso verificados. También se comprobó que las pruebas mantienen su caché dentro de `Proyecto/`.

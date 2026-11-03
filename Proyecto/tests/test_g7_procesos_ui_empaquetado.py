@@ -206,12 +206,12 @@ def test_welcome_buttons(qapp, monkeypatch):
     try:
         w = win.welcome
         assert hasattr(w, "btn_open")
-        assert hasattr(w, "btn_create_files")
+        assert hasattr(w, "btn_combine")
         assert not hasattr(w, "btn_blank")
 
         called = []
-        monkeypatch.setattr(win, "create_from_files", lambda: called.append(True))
-        w.btn_create_files.click()
+        monkeypatch.setattr(win, "combine_dialog", lambda: called.append(True))
+        w.btn_combine.click()
         assert called == [True]
     finally:
         win.close()
