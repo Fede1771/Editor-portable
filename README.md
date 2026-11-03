@@ -65,13 +65,16 @@ No requiere instalación, permisos de administrador ni dependencias previas de P
 
 ## ⚖️ ¿Por qué elegir Editor PDF Portable?
 
-| Característica | Qué ofrece | Consideración práctica |
-|---|---|---|
-| **Procesamiento local** | Edición, maquetación y OCR directamente en tu equipo sin transferir datos a la nube. | Privacidad garantizada; apto para documentos confidenciales o corporativos. |
-| **Tablas vectoriales** | Inserción y eliminación de filas y columnas, con altura en mm y barra contextual interactiva. | Requiere una grilla detectable y espacio vertical suficiente para la operación. |
-| **Distribución portable** | Paquete autocontenido con runtime y dependencias incluidas; no requiere administrador. | Conservá la carpeta `_internal/`; ejecutalo directamente desde disco o USB. |
-| **Combinar archivos** | Unificación rápida y ordenada de múltiples documentos PDF e imágenes (`.png`, `.jpg`, `.bmp`, `.tiff`). | Proceso nativo inmediato con opciones para generar marcadores e índice. |
-| **OCR español e inglés** | Reconocimiento óptico de caracteres local integrado mediante Tesseract y modelos incluidos. | Digitaliza páginas escaneadas permitiendo buscar y seleccionar texto. |
+Comparativa frente a las alternativas más comunes del mercado (servicios web en la nube y suites comerciales tradicionales):
+
+| Característica | 📄 Editor PDF Portable | ☁️ Servicios Web / En la nube (iLovePDF, Smallpdf, etc.) | 💼 Editores Comerciales Tradicionales (Adobe Acrobat, Foxit, etc.) |
+|---|---|---|---|
+| **Privacidad y confidencialidad** | **100% local y seguro:** Tus archivos nunca salen de tu computadora ni se transmiten por internet. Esencial para información bancaria, legal, médica o empresarial confidencial. | **Riesgo de privacidad:** Requieren subir tus documentos a servidores de terceros desconocidos en la nube para procesarlos. | Suelen recopilar analíticas de uso, exigir inicio de sesión obligatorio y forzar sincronización con su nube propietaria. |
+| **Permisos e instalación** | **Sin permisos de administrador:** Extraés el ZIP en cualquier carpeta o pendrive y funciona de inmediato, ideal para computadoras de trabajo o corporativas con políticas de seguridad restrictivas. | No requiere instalación, pero exige conexión permanente a internet y subir archivos pesados consumiendo ancho de banda. | Exigen instaladores pesados (cientos de MB o varios GB) que **requieren permisos de administrador (UAC)** para instalarse en el sistema. |
+| **Edición de tablas** | **Motor vectorial interactivo:** Permite insertar y eliminar filas/columnas, ajustar alturas en milímetros y estirar bordes con el mouse conservando los vectores originales sin rasterizar a imagen. | Generalmente no admiten edición de tablas o rompen por completo la estructura vectorial de la página. | La modificación de tablas suele ser muy rígida, costosa o limitarse a recreaciones aproximadas que alteran la tipografía. |
+| **Combinar archivos** | **Nativo y sin límites:** Unificá múltiples PDFs y colecciones de imágenes al instante, con reordenamiento visual y generación automática de índice/marcadores. | Suelen imponer límites diarios de archivos, restricciones por tamaño máximo (MB) o agregar marcas de agua en la versión gratuita. | Función bloqueada detrás de costosas licencias comerciales o suscripciones de pago. |
+| **OCR (Reconocimiento)** | **OCR offline integrado:** Modelos en español e inglés empaquetados localmente; digitaliza documentos escaneados de forma privada y sin demoras de red. | Depende de colas de espera en servidores remotos y suele exigir planes de pago para archivos de más de un par de páginas. | Suele requerir módulos adicionales con costo de licencia extra o planes profesionales elevados. |
+| **Modelo y costo** | **Gratuito, libre y sin límites:** Sin suscripciones mensuales, sin registros de correo, sin marcas de agua y sin publicidad. | Modelo *freemium* con cuotas diarias muy bajas, colas lentas y muros de pago constantes. | Suscripciones mensuales o anuales continuas de alto costo corporativo. |
 
 ---
 
