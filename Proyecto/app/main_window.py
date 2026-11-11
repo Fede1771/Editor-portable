@@ -11,9 +11,9 @@ import pymupdf as fitz
 from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
+    QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QStackedWidget,
-    QTabWidget, QToolBar, QToolButton, QWidget, QHBoxLayout, QVBoxLayout,
+    QStyle, QTabWidget, QToolBar, QToolButton, QWidget, QHBoxLayout, QVBoxLayout,
 )
 
 from . import content_ops as cops
@@ -34,7 +34,7 @@ from .doc_tab import DocTab
 from .privacy import TempManager, is_private_mode, set_private_mode
 from .welcome import WelcomeWidget, add_recent_file, get_recent_files, clear_recent_files
 from .viewer import (
-    FIT_NONE, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
+    FIT_NONE, FIT_PAGE, FIT_WIDTH, MODE_CONTINUOUS, MODE_SINGLE, MODE_TWO,
     TOOL_HIGHLIGHT, TOOL_IMAGE, TOOL_LINK, TOOL_NOTE, TOOL_PAN, TOOL_PEN,
     TOOL_REDACT, TOOL_SELECT, TOOL_STRIKEOUT, TOOL_TABLE, TOOL_TEXT, TOOL_UNDERLINE,
 )
@@ -122,13 +122,13 @@ class MainWindow(QMainWindow):
 
         self.a_zoom_in = self._act("＋", lambda: v("zoom_in"), "Ctrl+=", "Acercar")
         self.a_zoom_out = self._act("－", lambda: v("zoom_out"), "Ctrl+-", "Alejar")
-        self.a_fit_w = self._act("Ancho", lambda: v("fit_width"), "Ctrl+1", "Ajustar al ancho")
-        self.a_fit_p = self._act("Página", lambda: v("fit_page"), "Ctrl+2", "Ajustar a la página")
+        self.a_fit_w = self._act("Ancho", self._fit_width, "Ctrl+1", "Ajustar al ancho de la pantalla", checkable=True)
+        self.a_fit_p = self._act("Página", self._fit_page, "Ctrl+2", "Ajustar página completa", checkable=True)
         self.a_rot_l = self._act("⟲", lambda: v("rotate_view", -90), "Ctrl+Shift+-", "Rotar vista a la izquierda")
         self.a_rot_r = self._act("⟳", lambda: v("rotate_view", 90), "Ctrl+Shift+=", "Rotar vista a la derecha")
         self.a_prev = self._act("◀", lambda: v("prev_page"), None, "Página anterior")
         self.a_next = self._act("▶", lambda: v("next_page"), None, "Página siguiente")
-        self.a_side = self._act("Panel lateral", self._toggle_side, "F4", "Mostrar u ocultar el panel lateral")
+        self.a_side = self._act("Panel lateral", self._toggle_side, "F4", "Mostrar u ocultar el panel lateral", checkable=True)
         self.a_find = self._act("🔍 Buscar…", self.show_find_bar, "Ctrl+F", "Buscar texto en el documento")
         self.a_find_next = self._act("Buscar siguiente", self._find_next, "F3", "Ir a la coincidencia siguiente")
         self.a_find_prev = self._act("Buscar anterior", self._find_prev, "Shift+F3", "Ir a la coincidencia anterior")
@@ -216,54 +216,83 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self):
         from .tools_panel import ToolsPanel
         panel = self.tools_panel = ToolsPanel(self)
+
         self.btn_main = QToolButton(panel)
+        self.btn_main.setObjectName("BtnMain")
         self.btn_main.setText("Archivo")
+        self.btn_main.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
+        self.btn_main.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_main.setProperty("hasMenu", True)
+        self.btn_main.setFixedHeight(28)
         self.btn_main.setAccessibleName("Archivo y opciones del documento")
         self.btn_main.setToolTip("Abrir, guardar, imprimir y otras opciones del documento")
         self.btn_main.setPopupMode(QToolButton.InstantPopup)
         self.btn_main.setMenu(self._build_main_dropdown_menu())
         panel.quick_flow.addWidget(self.btn_main)
+
         for action, label in [(self.a_open, "Abrir"), (self.a_save, "Guardar"),
                               (self.a_undo, "Deshacer"), (self.a_redo, "Rehacer")]:
             panel.quick_flow.addWidget(panel.button(action, panel, label))
+
+        self.btn_side = panel.button(self.a_side, panel, "Panel lateral")
+        self.btn_side.setFixedHeight(28)
+        self.btn_side.setCheckable(True)
+        self.btn_side.setChecked(True)
+        self.btn_side.setToolTip("Mostrar u ocultar panel lateral de miniaturas (F4)")
+        panel.quick_flow.addWidget(self.btn_side)
+
         navigation = QWidget(panel)
         navigation_layout = QHBoxLayout(navigation)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
-        navigation_layout.setSpacing(3)
-        navigation_layout.addWidget(panel.button(self.a_prev, navigation))
+        navigation_layout.setSpacing(2)
+        navigation_layout.addWidget(panel.button(self.a_prev, navigation, "◀"))
         self.page_spin = QSpinBox()
         self.page_spin.setMinimum(1)
         self.page_spin.setKeyboardTracking(False)
+        self.page_spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.page_spin.setAlignment(Qt.AlignCenter)
         self.page_spin.setAccessibleName("Página actual")
         self.page_spin.setToolTip("Ir a la página indicada")
-        self.page_spin.setFixedWidth(58)
+        self.page_spin.setFixedSize(52, 28)
         self.page_spin.valueChanged.connect(lambda val: self._view_do("goto_page", val - 1))
         navigation_layout.addWidget(self.page_spin)
         self.page_total = QLabel(" / 0 ")
+        self.page_total.setObjectName("PageTotal")
+        self.page_total.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         navigation_layout.addWidget(self.page_total)
-        navigation_layout.addWidget(panel.button(self.a_next, navigation))
+        navigation_layout.addWidget(panel.button(self.a_next, navigation, "▶"))
         panel.quick_flow.addWidget(navigation)
         zoom = QWidget(panel)
         zoom_layout = QHBoxLayout(zoom)
         zoom_layout.setContentsMargins(0, 0, 0, 0)
-        zoom_layout.setSpacing(3)
-        zoom_layout.addWidget(panel.button(self.a_zoom_out, zoom))
+        zoom_layout.setSpacing(2)
+        btn_zoom_out = panel.button(self.a_zoom_out, zoom)
+        btn_zoom_out.setFixedSize(28, 28)
+        zoom_layout.addWidget(btn_zoom_out)
         self.zoom_combo = QComboBox()
         self.zoom_combo.setEditable(True)
         self.zoom_combo.addItems(ZOOM_PRESETS)
-        self.zoom_combo.setFixedWidth(80)
+        self.zoom_combo.setFixedSize(76, 28)
         self.zoom_combo.setAccessibleName("Nivel de zoom")
         self.zoom_combo.activated.connect(self._zoom_from_combo)
         self.zoom_combo.lineEdit().editingFinished.connect(self._zoom_from_combo)
         zoom_layout.addWidget(self.zoom_combo)
-        zoom_layout.addWidget(panel.button(self.a_zoom_in, zoom))
-        zoom_layout.addWidget(panel.button(self.a_fit_p, zoom, "Ajustar página"))
+        btn_zoom_in = panel.button(self.a_zoom_in, zoom)
+        btn_zoom_in.setFixedSize(28, 28)
+        zoom_layout.addWidget(btn_zoom_in)
+        self.btn_fit_w = panel.button(self.a_fit_w, zoom, "Ancho")
+        self.btn_fit_w.setFixedHeight(28)
+        self.btn_fit_w.setCheckable(True)
+        zoom_layout.addWidget(self.btn_fit_w)
+        self.btn_fit_p = panel.button(self.a_fit_p, zoom, "Página")
+        self.btn_fit_p.setFixedHeight(28)
+        self.btn_fit_p.setCheckable(True)
+        zoom_layout.addWidget(self.btn_fit_p)
         panel.quick_flow.addWidget(zoom)
         panel.quick_flow.addWidget(panel.button(self.a_find, panel, "Buscar texto"))
         self.a_commands = self._act("Buscar herramienta…", self.show_tool_finder, "Ctrl+K",
                                    "Encontrar cualquier herramienta por su nombre")
         self.addAction(self.a_commands)
-        panel.quick_flow.addWidget(panel.button(self.a_commands, panel, "Herramientas"))
         panel.quick_flow.addStretch(1)
         panel.add_group("Editar", [(self.a_tool_select, "Seleccionar"), (self.a_tool_text, "Editar texto"),
                                    (self.a_tool_image, "Insertar imagen"), (self.a_tool_redact, "Censurar"),
@@ -738,6 +767,12 @@ class MainWindow(QMainWindow):
             a.setEnabled(has)
         self.a_undo.setEnabled(has and tab.can_undo)
         self.a_redo.setEnabled(has and tab.can_redo)
+        if hasattr(self, "btn_side"):
+            self.btn_side.setEnabled(has)
+        if hasattr(self, "btn_fit_w"):
+            self.btn_fit_w.setEnabled(has)
+        if hasattr(self, "btn_fit_p"):
+            self.btn_fit_p.setEnabled(has)
         if has:
             tab.view.table_toolbar.undo_button.setEnabled(tab.can_undo)
         for w in (self.page_spin, self.zoom_combo, self.mode_combo):
@@ -752,6 +787,15 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentIndex(1)
         v = tab.view
+        if hasattr(self, "btn_side"):
+            self.btn_side.setChecked(tab.side.isVisible())
+        self.a_side.setChecked(tab.side.isVisible())
+        self.a_fit_w.setChecked(v.fit == FIT_WIDTH)
+        self.a_fit_p.setChecked(v.fit == FIT_PAGE)
+        if hasattr(self, "btn_fit_w"):
+            self.btn_fit_w.setChecked(v.fit == FIT_WIDTH)
+        if hasattr(self, "btn_fit_p"):
+            self.btn_fit_p.setChecked(v.fit == FIT_PAGE)
         self.page_spin.blockSignals(True)
         self.page_spin.setMaximum(v.page_count)
         self.page_spin.setValue(v.current_page + 1)
@@ -775,10 +819,31 @@ class MainWindow(QMainWindow):
             return
         self._view_do("set_zoom", value, FIT_NONE)
 
+    def _fit_width(self):
+        tab = self.current_tab()
+        if tab:
+            if tab.view.fit == FIT_WIDTH:
+                tab.view.fit_page()
+            else:
+                tab.view.fit_width()
+            self._update_controls()
+
+    def _fit_page(self):
+        tab = self.current_tab()
+        if tab:
+            if tab.view.fit == FIT_PAGE:
+                tab.view.fit_width()
+            else:
+                tab.view.fit_page()
+            self._update_controls()
+
     def _toggle_side(self):
         tab = self.current_tab()
         if tab:
             tab.toggle_sidebar()
+            self.a_side.setChecked(tab.side.isVisible())
+            if hasattr(self, "btn_side"):
+                self.btn_side.setChecked(tab.side.isVisible())
 
     # ---------------------------------------------------------------- herramientas de interacción
     def _set_active_tool(self, tool: str):

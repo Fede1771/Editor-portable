@@ -258,6 +258,8 @@ class AttachmentWidget(QWidget):
     def __init__(self, doc: fitz.Document, parent=None):
         super().__init__(parent)
         self.doc = doc
+        self.setMinimumWidth(0)
+        self.minimumSizeHint = lambda: QSize(160, 100)
         self.icon_provider = QFileIconProvider()
         self.icon_provider.setOptions(QFileIconProvider.Option.DontUseCustomDirectoryIcons)
 

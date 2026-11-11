@@ -1,10 +1,10 @@
 # 📄 Editor PDF Portable
 
 [![Windows](https://img.shields.io/badge/Plataforma-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/Fede1771/Editor-portable/releases)
-[![Versión publicada](https://img.shields.io/github/v/release/Fede1771/Editor-portable)](https://github.com/Fede1771/Editor-portable/releases/latest)
+[![Versión publicada](https://img.shields.io/badge/Versi%C3%B3n-2.1.4-blue)](https://github.com/Fede1771/Editor-portable/releases/latest)
 [![Procesamiento local](https://img.shields.io/badge/Procesamiento-Local-success)](#-privacidad-y-almacenamiento)
 [![Sin Administrador](https://img.shields.io/badge/Permisos-Sin%20Admin-brightgreen)](#-requisitos-del-usuario-final)
-[![Pruebas](https://img.shields.io/badge/Pruebas-pytest-success)](Proyecto/tests)
+[![Pruebas](https://img.shields.io/badge/Pruebas-250%20passed-success)](Proyecto/tests)
 
 > **Editor de PDF de escritorio para Windows, con procesamiento 100% local y distribución portable.**
 >
@@ -84,30 +84,35 @@ Para maximizar el espacio útil de visualización del documento, la interfaz pre
 
 ### Esquema de la interfaz:
 ```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [Archivo ▾]   [↶ Deshacer] [↷ Rehacer]   [◀] 1 / 15 [▶]   [ 100% ▾ ]   [🔍 Herramientas] │ <- Franja de navegación
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ [🔤 Seleccionar] [✍ Editar texto] [⬛ Censurar] [🖼 Imagen] [🖐 Mano] [📐 Tablas ▾] ...   │ <- Herramientas frecuentes
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Archivo ▾] [Guardar] [◀] [▶] [ 1 / 15 ] [ - ] [ 100% ▾ ] [ + ] [ ↔ Ancho ] [ ↕ Página ] [🔍 Herramientas] │ <- Franja de navegación y zoom
+├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [🔤 Seleccionar] [✍ Editar texto] [⬛ Censurar] [🖼 Imagen] [🖐 Mano] [📐 Tablas ▾] [✏️ Anotar ▾] ...        │ <- Herramientas frecuentes
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Franja superior de navegación y archivo:**
+1. **Franja superior de navegación y zoom directo:**
    - Botón **Archivo** (abrir, combinar archivos, guardar, imprimir, cerrar).
-   - Botones rápidos de **Deshacer** (`Ctrl + Z`) y **Rehacer** (`Ctrl + Y`).
-   - Controles de navegación de página (anterior, siguiente, selector numérico y total de páginas).
-   - Selector de zoom y ajuste de visualización (ancho o página completa).
+   - Acceso rápido a **Guardar** (`Ctrl + S`).
+   - Controles de navegación de página (anterior, siguiente, caja de salto numérico directo y total de páginas).
+   - Selector de zoom numérico (`＋` / `－`) y botones dedicados de ajuste instantáneo:
+     - **↔ Ancho (`Ctrl + 1`):** Expande la página para ocupar exactamente el ancho de la ventana.
+     - **↕ Página (`Ctrl + 2`):** Ajusta la página completa para verla sin cortes verticales.
    - Botón **Herramientas** (`Ctrl + K`): Buscador universal de herramientas.
-2. **Franja inferior de herramientas frecuentes y grupos:**
+2. **Panel lateral con iconografía vectorial SVG:**
+   - Botón colapsable con icono dinámico para abrir o contraer el panel con un clic.
+   - Pestañas con iconos vectoriales SVG limpios de alta resolución: **Páginas**, **Marcadores**, **Anotaciones** y **Adjuntos**, eliminando emojis y garantizando renderizado nítido en pantallas estándar y HiDPI.
+3. **Franja inferior de herramientas frecuentes y grupos:**
    - Accesos directos a las herramientas principales: **Seleccionar** (`V`), **Editar texto** (`T`), **Censurar** (`R`), **Imagen** (`I`), **Mano** (`H`) y el botón principal de **Tablas** (`B`).
    - Menús agrupados:
      - **Tablas:** Acceso directo a edición interactiva y diálogo de ampliación avanzada.
      - **Anotar:** Resaltador, subrayador, tachador, notas adhesivas, lápiz libre y enlaces.
      - **Páginas:** Rotación, extracción, eliminación, combinación e inserción de páginas en blanco.
      - **Documento:** OCR local, compresión, formularios AcroForms, adjuntos y metadatos.
-3. **Diseño responsivo y adaptabilidad (`FlowLayout`):**
+4. **Diseño responsivo y adaptabilidad (`FlowLayout`):**
    - Los controles se distribuyen de manera fluida según el ancho disponible de la ventana.
    - En pantallas pequeñas o ventanas angostas, los botones secundarios pasan automáticamente a modo de solo icono, evitando menús de desborde engorrosos.
-4. **Buscador rápido de herramientas (`Ctrl + K`):**
+5. **Buscador rápido de herramientas (`Ctrl + K`):**
    - Permite encontrar cualquier funcionalidad del editor escribiendo su nombre (por ejemplo: `rotar`, `ocr`, `comprimir`, `tabla`, `censurar`, `combinar`).
    - El buscador normaliza el texto ingresado, permitiendo encontrar funciones sin importar el uso de mayúsculas o acentos.
 
@@ -155,15 +160,24 @@ Si necesitás estirar una página completa o realizar un corte por coordenadas v
 ## 🗂️ Guía de uso por tareas
 
 ### 1. Lectura y navegación de documentos
+- **Apertura inteligente (Página Completa):** Los documentos abren de forma predeterminada en modo **Ajustar a la página** (`FIT_PAGE`), asegurando que ningún documento en orientación vertical u horizontal abra cortado verticalmente.
 - **Vistas flexibles:** Alterná entre visualización continua, una sola página o doble página enfrentada.
-- **Zoom fluido:** Modos de zoom preestablecidos, ajuste automático al ancho (`Ctrl + 1`), ajuste a página completa (`Ctrl + 2`) y zoom libre mediante `Ctrl + rueda del mouse`.
-- **Navegación de miniaturas:** Panel lateral con vista previa de páginas para saltar de forma inmediata a cualquier sección.
+- **Zoom directo y fluido:** Botones dedicados en la barra superior:
+  - **`[ ↔ Ancho ]` (`Ctrl + 1`):** Expande el documento al ancho disponible de la pantalla para máxima legibilidad.
+  - **`[ ↕ Página ]` (`Ctrl + 2`):** Ajusta la página entera (alto y ancho) en pantalla.
+  - **Controles numéricos rápidos:** Botones `＋` / `－`, selector de porcentaje y zoom libre con `Ctrl + rueda del mouse`.
+- **Navegación de miniaturas:** Panel lateral con vista previa de páginas e iconografía SVG vectorial para saltar de forma inmediata a cualquier sección.
 - **Rotación visual de vista:** Rotá la orientación de lectura en incrementos de 90° en sentido horario o antihorario.
 - **Búsqueda interactiva (`Ctrl + F`):** Localizá palabras o frases con resaltado en tiempo real y navegación entre coincidencias.
 - **Preservación de lectura:** Al editar texto, agregar elementos o deshacer/rehacer cambios, la vista mantiene intacta la posición de lectura y el desplazamiento de la página.
 
 ### 2. Edición de texto existente y nuevo
-- **Edición en bloque:** Con la herramienta **Editar texto** (`T`), hacé clic sobre cualquier bloque o tarjeta de texto existente para modificar su contenido. El editor detecta automáticamente la tipografía original, tamaño, color, alineación e interlineado para integrarse armónicamente con el diseño del documento.
+- **Motor de Edición In Situ con Blindaje Geométrico (`app/content_ops.py`):**
+  - **Aislamiento geométrico estricto:** Algoritmo que clasifica la posición relativa (centros y solapamientos) de todas las palabras vecinas en la página. Confiná el área de redacción (`redact_rect`) con topes físicos contra renglones superiores, inferiores y adyacentes en la misma línea.
+  - **Cero mutilación de caracteres vecinos:** Editar una palabra, carácter individual (como `&` por `y`) o frase en párrafos o títulos densos **nunca recorta, borra ni afecta las letras de renglones adyacentes**, incluso cuando las cajas tipográficas de las fuentes se tocan o solapan sutilmente en el PDF.
+  - **Detección inteligente de estilos y fondos:** Detecta automáticamente tipografía, peso, tamaño, color y color de fondo muestreado para integrarse armónicamente con el diseño del documento.
+  - **Supresión de marcos espurios:** No confunde fondos oscuros o coloreados con tarjetas delimitadas y no estampa recuadros negros artificiales sobre el PDF.
+  - **Preservación vectorial total:** Aplica redacciones con `PDF_REDACT_LINE_ART_NONE`, dejando 100% intactos los trazados, líneas y vectores gráficos originales.
 - **Inserción de nuevos textos:** Hacé clic y arrastrá sobre un espacio vacío para crear un nuevo cuadro de texto con formato personalizado.
 - **Acciones rápidas con el mouse (Barra contextual flotante):** Al seleccionar cualquier fragmento de texto con la herramienta **Seleccionar** (`V`), aparece una barra flotante compacta junto a la selección con accesos inmediatos:
   - **Copiar** (`Ctrl + C`): Copia el texto seleccionado al portapapeles.
@@ -275,16 +289,18 @@ Las versiones corresponden al [entorno fijado en el lock](Proyecto/requirements/
 | **Python / CPython 3.14 x64** | Ejecuta la aplicación, coordina la interfaz y las operaciones de manipulación documental. | Permite combinar bibliotecas nativas de alto rendimiento con una lógica de aplicación modular y legible. |
 | **PySide6 6.12.0 / Qt 6** | Proporciona ventanas, pestañas, diálogos, eventos, atajos, barras contextuales y renderizado visual. | Ofrece controles nativos de escritorio para Windows, soporte HiDPI fluido y arquitectura de señales robusta. |
 | **QtCore, QtGui y QtWidgets** | Gestionan señales, geometría de widgets, eventos de teclado y mouse, fuentes y distribución adaptable. | Estándar de la biblioteca Qt; mantiene un rendimiento predecible y homogéneo en toda la interfaz. |
+| **PySide6.QtSvg** | Genera y renderiza dinámicamente iconografía vectorial nítida para barras de herramientas, botones de zoom y paneles laterales. | Elimina la borrosidad de los iconos en pantallas estándar y HiDPI (4K/Retina), asegurando coherencia visual sin emojis dependientes del sistema operativo. |
 | **QtPrintSupport** | `QPrinter`, el diálogo nativo y `QPainter` imprimen el documento que está en memoria, incluidas sus ediciones. | Permite seleccionar impresora, rangos y copias mediante los controladores estándar instalados en Windows. |
 | **QSettings** | Conserva preferencias e historial; normalmente usa el Registro de Windows. Con `EDITORPDF_SETTINGS_DIR` escribe un INI aislado. | Centraliza la configuración y permite aislarla en pruebas sin modificar las preferencias del sistema. |
 | **PyMuPDF 2.0 / MuPDF** | Abre y renderiza PDFs, extrae texto, detecta tablas, compone páginas, edita contenido, administra anotaciones, formularios, combinación y cifrado. | Motor de alto rendimiento de Artifex MuPDF integrado en C/C++. Permite composición vectorial directa en memoria sin convertir páginas a mapas de bits. |
+| **Motor de Edición In Situ con Blindaje Geométrico (`app/content_ops.py`)** | Aísla y sustituye texto con confinamiento físico estricto, clasificación espacial relativa por centros y preservación de vectores (`PDF_REDACT_LINE_ART_NONE`). | Previene la eliminación accidental de letras descendentes/ascendentes en líneas contiguas y resguarda tarjetas visuales, cajas y fondos oscuros sin añadir bordes artificiales. |
 | **pypdf 6.21.2** | Analiza objetos y streams PDF para formularios, apariencias y validación estructural de documentos. | Complementa a MuPDF con acceso a bajo nivel a estructuras PDF en Python puro. |
 | **Tesseract y modelos `spa` / `eng`** | Reconocen texto en español e inglés mediante la integración OCR de MuPDF; los archivos `.traineddata` están en `Proyecto/data/tessdata/`. | Permiten digitalizar páginas escaneadas localmente, sin invocar ejecutables externos ni requerir conexión a internet. |
 | **Biblioteca estándar de Python** | `multiprocessing` con `spawn` aísla trabajos PDF pesados; `tempfile`, `pathlib`, `os.replace` y `shutil` gestionan archivos de forma atómica; `json`, `re` manejan datos y validaciones. | Resuelve la persistencia y la concurrencia de forma confiable sin dependencias externas innecesarias. |
 | **PyInstaller 6.22.3** | Empaqueta Python, módulos, DLL y recursos en una distribución `onedir` con ejecutable y carpeta `_internal/`. | Permite distribuir la aplicación a cualquier equipo Windows sin necesidad de tener Python instalado ni privilegios de administrador. |
 | **Tcl/Tk del splash de PyInstaller** | Presenta la imagen de inicio configurada en el archivo `.spec`, antes de que se muestre la ventana Qt. | Brinda respuesta visual inmediata durante la carga inicial del motor en equipos estándar. |
 | **PDF, HTML y CSS** | PDF es el formato de trabajo principal. MuPDF Story permite maquetar fragmentos HTML y CSS cuando se requiere renderizado tipográfico. | Estándares documentales universales para maquetación y lectura. |
-| **pytest 9.1.1** | Ejecuta pruebas de edición, guardado, seguridad, procesos e interfaz; utiliza documentos sintéticos y preferencias aisladas. | Garantiza la integridad del código y previene regresiones en cada versión. |
+| **pytest 9.1.1** | Ejecuta 250 pruebas automatizadas de edición, guardado, seguridad, procesos, interfaz y blindaje geométrico; utiliza documentos sintéticos y preferencias aisladas. | Garantiza la integridad del código y previene regresiones en cada versión. |
 | **Git y GitHub Releases** | Versionan el código y distribuyen el ZIP portable y las notas de cada publicación. | Separan el control de versiones de código fuente de los binarios distribuidos. |
 | **Markdown y Mermaid** | Presentan la guía de uso, tablas técnicas y diagramas de arquitectura en el repositorio. | Documentación interactiva y legible directamente en la plataforma de alojamiento. |
 

@@ -169,7 +169,7 @@ class PdfView(QAbstractScrollArea):
         self._sizes = [(p.rect.width, p.rect.height) for p in doc]
 
         self._zoom = 1.0
-        self._fit = FIT_WIDTH
+        self._fit = FIT_PAGE
         self._mode = MODE_CONTINUOUS
         self._rotation = 0
         self._current = 0

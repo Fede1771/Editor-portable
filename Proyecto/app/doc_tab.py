@@ -69,7 +69,8 @@ class ThumbnailDelegate(QStyledItemDelegate):
             font.setPointSize(9)
             painter.setFont(font)
             is_sel = bool(option.state & QStyle.State_Selected)
-            painter.setPen(QColor(0, 100, 200) if is_sel else QColor(50, 50, 50))
+            text_color = option.palette.highlight().color() if is_sel else option.palette.text().color()
+            painter.setPen(text_color)
             painter.drawText(QRect(rect.x(), y + thumb_h + 2, rect.width(), 18), Qt.AlignCenter, str(p_str))
             painter.restore()
 
@@ -328,6 +329,57 @@ class _DocSnapshot:
         self.cleanup()
 
 
+SVG_PAGES = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+<path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'></path>
+<polyline points='14 2 14 8 20 8'></polyline>
+<line x1='16' y1='13' x2='8' y2='13'></line>
+<line x1='16' y1='17' x2='8' y2='17'></line>
+<line x1='10' y1='9' x2='8' y2='9'></line>
+</svg>"""
+
+SVG_BOOKMARKS = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+<path d='M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'></path>
+</svg>"""
+
+SVG_COMMENTS = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+<path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'></path>
+</svg>"""
+
+SVG_ATTACHMENTS = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+<path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'></path>
+</svg>"""
+
+SVG_SIDEBAR = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+<rect x='3' y='3' width='18' height='18' rx='2'></rect>
+<line x1='9' y1='3' x2='9' y2='21'></line>
+<line x1='5' y1='7' x2='7' y2='7'></line>
+<line x1='5' y1='11' x2='7' y2='11'></line>
+<line x1='5' y1='15' x2='7' y2='15'></line>
+</svg>"""
+
+
+def _make_svg_icon(svg_xml: str) -> QIcon:
+    from PySide6.QtSvg import QSvgRenderer
+    from PySide6.QtCore import QByteArray
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    normal_color = app.palette().windowText().color().name() if app else "#dcdcdc"
+    disabled_color = "#888888" if (app and app.palette().windowText().color().lightness() > 128) else "#aaaaaa"
+
+    icon = QIcon()
+    for c, mode in [(normal_color, QIcon.Normal), (disabled_color, QIcon.Disabled)]:
+        svg = svg_xml.replace("currentColor", c)
+        renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+        pix = QPixmap(20, 20)
+        pix.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pix)
+        renderer.render(p)
+        p.end()
+        icon.addPixmap(pix, mode)
+    return icon
+
+
 class DocTab(QWidget):
     """Un documento abierto, con historial de cambios (deshacer / rehacer)."""
 
@@ -359,23 +411,26 @@ class DocTab(QWidget):
         self.attachments = AttachmentWidget(doc, parent=self)
 
         self.side = QTabWidget()
+        self.side.setMinimumWidth(0)
+        self.side.minimumSizeHint = lambda: QSize(190, 100)
         self.side.setTabPosition(QTabWidget.West)
+        self.side.setIconSize(QSize(20, 20))
         self.side.setStyleSheet("""
             QTabBar::tab {
-                min-width: 30px;
-                max-width: 36px;
+                min-width: 32px;
+                max-width: 38px;
                 padding: 10px 4px;
-                font-size: 13pt;
             }
         """)
-        self.side.addTab(self.thumbs, "📄")
-        self.side.addTab(self.bookmarks, "📑")
-        self.side.addTab(self.comments, "💬")
-        self.side.addTab(self.attachments, "📎")
+        self.side.addTab(self.thumbs, _make_svg_icon(SVG_PAGES), "")
+        self.side.addTab(self.bookmarks, _make_svg_icon(SVG_BOOKMARKS), "")
+        self.side.addTab(self.comments, _make_svg_icon(SVG_COMMENTS), "")
+        self.side.addTab(self.attachments, _make_svg_icon(SVG_ATTACHMENTS), "")
         self.side.setTabToolTip(0, "Miniaturas de páginas")
         self.side.setTabToolTip(1, "Marcadores / Índice")
         self.side.setTabToolTip(2, "Comentarios y notas")
         self.side.setTabToolTip(3, "Archivos adjuntos embebidos")
+        self.side.tabBarClicked.connect(self._on_side_tab_clicked)
         self._sync_side_tabs()
 
         self.security_banner = SecurityBanner(self)
@@ -616,17 +671,25 @@ class DocTab(QWidget):
         rows = self.thumbs.selected_rows()
         return rows if rows else [self.view.current_page]
 
+    def _on_side_tab_clicked(self, index: int):
+        if index == self.side.currentIndex() and self.side.isVisible():
+            self.toggle_sidebar()
+
     def toggle_sidebar(self):
-        self.side.setVisible(not self.side.isVisible())
+        visible = not self.side.isVisible()
+        self.side.setVisible(visible)
+        if visible:
+            sizes = self.splitter.sizes()
+            if sizes and sizes[0] < 50:
+                total = sum(sizes) if sum(sizes) > 0 else 1140
+                self.splitter.setSizes([190, max(200, total - 190)])
 
     def _sync_side_tabs(self):
         has_bm = self.bookmarks.topLevelItemCount() > 0
         self.side.setTabEnabled(1, has_bm)
         total_c = self.comments.topLevelItemCount()
-        self.side.setTabText(2, "💬")
         self.side.setTabToolTip(2, f"Comentarios ({total_c})" if total_c else "Comentarios (0)")
         total_att = self.attachments.count()
-        self.side.setTabText(3, "📎")
         self.side.setTabToolTip(3, f"Archivos adjuntos ({total_att})" if total_att else "Archivos adjuntos (0)")
         if not has_bm and self.side.currentIndex() == 1:
             self.side.setCurrentIndex(0)

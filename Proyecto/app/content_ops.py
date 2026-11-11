@@ -899,11 +899,13 @@ def find_text_block_at(
 
 
 def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
-    """Detecta si el texto está contenido dentro de un recuadro o tarjeta pequeña (vectorial o escaneado).
-    Descarta fondos de página completos, márgenes o contenedores masivos para evitar borrar contenido adyacente."""
+    """Detecta si el texto está contenido dentro de un recuadro o tarjeta pequeña exclusiva.
+    Descarta fondos de página completos, márgenes, contenedores masivos o recuadros
+    que contengan otros elementos o texto adyacente."""
     # 1. Búsqueda en trazados vectoriales (PDFs nativos y diagramas)
     candidates = []
-    page_area = _page_bounds(page).get_area()
+    bounds = _page_bounds(page)
+    page_area = bounds.get_area()
     bbox_area = bbox.get_area()
 
     for d in page.get_drawings():
@@ -911,7 +913,7 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
         if r.width < 15.0 or r.height < 12.0:
             continue
         # Descartar estrictamente dibujos de fondo de página, márgenes o lienzos grandes
-        if r.width >= _page_bounds(page).width * 0.70 or r.height >= _page_bounds(page).height * 0.50:
+        if r.width >= bounds.width * 0.70 or r.height >= bounds.height * 0.50:
             continue
         if r.get_area() >= page_area * 0.25:
             continue
@@ -924,8 +926,26 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
         if exp.contains(bbox.tl) and exp.contains(bbox.br):
             candidates.append(r)
 
-    if candidates:
-        return min(candidates, key=lambda c: c.get_area())
+    # REGLA FUNDAMENTAL DE SEGURIDAD:
+    # Una tarjeta/botón para este bloque NO PUEDE contener ni solapar palabras ajenas en la página.
+    # Si contiene otras palabras, se trata de una sección, columna o banner multi-línea.
+    words = page.get_text("words")
+    outside_words = []
+    for w in words:
+        wr = fitz.Rect(w[:4])
+        inter = wr & bbox
+        if wr.get_area() > 0 and (inter.get_area() / wr.get_area() > 0.4):
+            continue
+        outside_words.append(wr)
+
+    valid_candidates = []
+    for c in candidates:
+        if any(c.intersects(ow) for ow in outside_words):
+            continue
+        valid_candidates.append(c)
+
+    if valid_candidates:
+        return min(valid_candidates, key=lambda c: c.get_area())
 
     if page.rotation:
         return None
@@ -938,6 +958,18 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
         ).intersect(page.rect)
         pix = render_bounded_pixmap(page, clip=search_rect, dpi=150, max_pixels=MAX_SAMPLE_PIXELS)
         if pix.width < 10 or pix.height < 10:
+            return None
+
+        # Si el fondo del área muestreada no es papel claro (luminancia < 160), la heurística
+        # de buscar píxeles oscuros (< 140) produce falsos positivos masivos sobre fondos oscuros o coloreados.
+        corners = [
+            pix.pixel(0, 0),
+            pix.pixel(pix.width - 1, 0),
+            pix.pixel(0, pix.height - 1),
+            pix.pixel(pix.width - 1, pix.height - 1),
+        ]
+        avg_lum = sum(0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2] for p in corners) / 4.0
+        if avg_lum < 160:
             return None
 
         scale_x, scale_y = pix.width / search_rect.width, pix.height / search_rect.height
@@ -990,6 +1022,18 @@ def detect_card_border(page: fitz.Page, bbox: fitz.Rect) -> fitz.Rect | None:
                 search_rect.x0 + right_x / scale_x,
                 search_rect.y0 + bot_y / scale_y,
             )
+            # Descartar si el borde detectado coincide casi exactamente con los márgenes de búsqueda
+            if (
+                abs(detected_card.x0 - search_rect.x0) < 1.5
+                and abs(detected_card.y0 - search_rect.y0) < 1.5
+                and abs(detected_card.x1 - search_rect.x1) < 1.5
+                and abs(detected_card.y1 - search_rect.y1) < 1.5
+            ):
+                return None
+
+            if any(detected_card.intersects(ow) for ow in outside_words):
+                return None
+
             return detected_card
     except Exception:
         pass
@@ -1026,6 +1070,18 @@ def replace_text_block(
     if card_border is None:
         card_border = detect_card_border(page, bbox)
 
+    # Doble verificación de seguridad: si card_border toca alguna palabra ajena en la página, se descarta
+    if card_border is not None:
+        words = page.get_text("words")
+        for w in words:
+            wr = fitz.Rect(w[:4])
+            inter = wr & bbox
+            if wr.get_area() > 0 and (inter.get_area() / wr.get_area() > 0.4):
+                continue
+            if card_border.intersects(wr):
+                card_border = None
+                break
+
     if card_border is not None:
         # Texto dentro de una pequeña tarjeta o botón acotado:
         # Redactar el interior sin tocar el contorno exterior
@@ -1043,13 +1099,13 @@ def replace_text_block(
         )
     else:
         # Texto libre en la página:
-        # La redacción debe cubrir ESTRICTAMENTE el área del texto original a reemplazar,
-        # con un margen de 1 punto para cubrir astas de letras, SIN tocar texto o imágenes adyacentes.
+        # La redacción debe cubrir el área del texto original a reemplazar,
+        # con un margen de seguridad mínimo (0.5 pt) para evitar invadir líneas adyacentes.
         redact_rect = fitz.Rect(
-            max(0.0, bbox.x0 - 1.0),
-            max(0.0, bbox.y0 - 1.0),
-            min(_page_bounds(page).width, bbox.x1 + 1.0),
-            min(_page_bounds(page).height, bbox.y1 + 1.5),
+            max(0.0, bbox.x0 - 0.5),
+            max(0.0, bbox.y0 - 0.5),
+            min(_page_bounds(page).width, bbox.x1 + 0.5),
+            min(_page_bounds(page).height, bbox.y1 + 0.5),
         )
 
         lines = new_text.splitlines() or [""]
@@ -1057,14 +1113,65 @@ def replace_text_block(
             (fitz.get_text_length(line, fontname=fontname, fontsize=fontsize) for line in lines),
             default=0.0
         )
-        actual_w = max(bbox.width, needed_w + 14.0)
-        actual_w = min(actual_w, _page_bounds(page).width - bbox.x0 - 6.0)
+        if needed_w > bbox.width:
+            actual_w = min(needed_w + 14.0, _page_bounds(page).width - bbox.x0 - 6.0)
+        else:
+            actual_w = bbox.width
 
         line_h = fontsize * 1.35
         needed_h = max(bbox.height, len(lines) * line_h + 6.0)
         actual_h = min(needed_h, _page_bounds(page).height - bbox.y0 - 6.0)
 
         target_rect = fitz.Rect(bbox.x0, bbox.y0, bbox.x0 + actual_w, bbox.y0 + actual_h)
+
+    # Protección estricta de adyacencia:
+    # Bajo ninguna circunstancia redact_rect puede tocar o solapar palabras vecinas fuera de bbox
+    words = page.get_text("words")
+    for w in words:
+        wr = fitz.Rect(w[:4])
+        inter = wr & bbox
+        if wr.get_area() > 0 and (inter.get_area() / wr.get_area() > 0.4):
+            continue
+        # Comprobar si la palabra vecina está en contacto con el área de redacción
+        expanded = fitz.Rect(redact_rect.x0 - 2.0, redact_rect.y0 - 2.0, redact_rect.x1 + 2.0, redact_rect.y1 + 2.0)
+        if not expanded.intersects(wr):
+            continue
+
+        v_overlap = max(0.0, min(bbox.y1, wr.y1) - max(bbox.y0, wr.y0))
+        min_h = min(bbox.height, wr.height)
+
+        if v_overlap < 0.4 * min_h:
+            # Están en renglones diferentes (arriba o abajo)
+            if (wr.y0 + wr.y1) / 2 < (bbox.y0 + bbox.y1) / 2:
+                # La palabra ajena está en el renglón de ARRIBA:
+                # La redacción jamás debe subir por encima del borde inferior de esa palabra
+                if redact_rect.y0 < wr.y1 + 0.1:
+                    redact_rect.y0 = max(redact_rect.y0, wr.y1 + 0.1)
+            else:
+                # La palabra ajena está en el renglón de ABAJO:
+                # La redacción jamás debe bajar por debajo del borde superior de esa palabra
+                if redact_rect.y1 > wr.y0 - 0.1:
+                    redact_rect.y1 = min(redact_rect.y1, wr.y0 - 0.1)
+        else:
+            # Están en el MISMO renglón (a la izquierda o a la derecha)
+            if (wr.x0 + wr.x1) / 2 < (bbox.x0 + bbox.x1) / 2:
+                # La palabra ajena está a la IZQUIERDA en el mismo renglón:
+                # La redacción jamás debe extenderse a la izquierda del borde derecho de esa palabra
+                if redact_rect.x0 < wr.x1 + 0.1:
+                    redact_rect.x0 = max(redact_rect.x0, wr.x1 + 0.1)
+            else:
+                # La palabra ajena está a la DERECHA en el mismo renglón:
+                # La redacción jamás debe extenderse a la derecha del borde izquierdo de esa palabra
+                if redact_rect.x1 > wr.x0 - 0.1:
+                    redact_rect.x1 = min(redact_rect.x1, wr.x0 - 0.1)
+
+    # Sanity check para asegurar que redact_rect siga siendo un rectángulo válido
+    if redact_rect.y0 >= redact_rect.y1:
+        redact_rect.y0 = bbox.y0
+        redact_rect.y1 = bbox.y1
+    if redact_rect.x0 >= redact_rect.x1:
+        redact_rect.x0 = bbox.x0
+        redact_rect.x1 = bbox.x1
 
     cleaned_text = new_text.strip()
     final_rect = target_rect
@@ -1165,11 +1272,6 @@ def replace_text_block(
     page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_NONE)
 
     if not cleaned_text:
-        if card_border is not None:
-            shape = page.new_shape()
-            shape.draw_rect(card_border)
-            shape.finish(color=(0.12, 0.12, 0.12), width=0.75)
-            shape.commit()
         return
 
     rc = page.insert_textbox(
@@ -1182,11 +1284,4 @@ def replace_text_block(
     )
     if rc < 0:
         raise ValueError("No fue posible insertar el texto en el área seleccionada.")
-
-    # Si había una tarjeta / recuadro, redibujar el contorno para garantizar máxima nitidez
-    if card_border is not None:
-        shape = page.new_shape()
-        shape.draw_rect(card_border)
-        shape.finish(color=(0.12, 0.12, 0.12), width=0.75)
-        shape.commit()
 

@@ -31,6 +31,9 @@ def main() -> int:
         print("No se encontró el ejecutable de salida.", file=sys.stderr)
         return 1
     shutil.copy2(root.parent / "Abrir_EditorPortable.bat", bundle / "Abrir_EditorPortable.bat")
+    ico = root / "data/app_icon.ico"
+    if ico.is_file():
+        shutil.copy2(ico, bundle / "app_icon.ico")
     print(f"Ejecutable generado: {exe}")
     if not args.no_zip:
         archive = shutil.make_archive(str(dist / "EditorPDFPortable"), "zip", str(dist), "EditorPDFPortable")
