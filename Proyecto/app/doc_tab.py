@@ -28,20 +28,30 @@ class ThumbnailDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         thumb_h = int(THUMB_W * 1.42)
-        return QSize(option.rect.width() if option.rect.width() > 0 else (THUMB_W + 24), thumb_h + 30)
+        view = getattr(option, "widget", None)
+        vw = view.viewport().width() if (view and hasattr(view, "viewport")) else 0
+        w = max(vw, THUMB_W + 20)
+        return QSize(w, thumb_h + 28)
 
     def paint(self, painter: QPainter, option, index):
         rect = option.rect
         thumb_h = int(THUMB_W * 1.42)
         thumb_w = THUMB_W
-        x = rect.x() + max(0, (rect.width() - thumb_w) // 2)
+        view = getattr(option, "widget", None)
+        view_w = view.viewport().width() if (view and hasattr(view, "viewport")) else rect.width()
+        available_w = min(rect.width(), view_w) if view_w > 0 else rect.width()
+
+        # Centrar horizontalmente respecto al ancho visible disponible
+        x = rect.x() + max(0, (available_w - thumb_w) // 2)
         y = rect.y() + 4
 
         # Resaltado de selección centrado alrededor de la miniatura
         if option.state & QStyle.State_Selected:
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing)
-            card_rect = QRect(x - 6, y - 2, thumb_w + 12, thumb_h + 24)
+            card_w = min(thumb_w + 12, max(20, available_w - 4))
+            cx = rect.x() + max(0, (available_w - card_w) // 2)
+            card_rect = QRect(cx, y - 2, card_w, thumb_h + 24)
             painter.setBrush(QColor(0, 120, 215, 30))
             painter.setPen(QPen(QColor(0, 120, 215), 1.5))
             painter.drawRoundedRect(card_rect, 6, 6)
@@ -54,7 +64,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
             if not pix.isNull():
                 tw = pix.width()
                 th = pix.height()
-                tx = rect.x() + max(0, (rect.width() - tw) // 2)
+                tx = rect.x() + max(0, (available_w - tw) // 2)
                 ty = y + (thumb_h - th) // 2
                 painter.fillRect(QRect(tx + 2, ty + 2, tw, th), QColor(0, 0, 0, 30))
                 painter.drawPixmap(tx, ty, pix)
@@ -71,7 +81,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
             is_sel = bool(option.state & QStyle.State_Selected)
             text_color = option.palette.highlight().color() if is_sel else option.palette.text().color()
             painter.setPen(text_color)
-            painter.drawText(QRect(rect.x(), y + thumb_h + 2, rect.width(), 18), Qt.AlignCenter, str(p_str))
+            painter.drawText(QRect(rect.x(), y + thumb_h + 2, available_w, 18), Qt.AlignCenter, str(p_str))
             painter.restore()
 
 
@@ -94,6 +104,8 @@ class ThumbnailList(QListWidget):
         self.setItemDelegate(ThumbnailDelegate(self))
         self.setSpacing(6)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setResizeMode(QListWidget.Adjust)
         self._next = 0
         self._failed_pages: set[int] = set()
         self._timer = QTimer(self)
@@ -103,6 +115,12 @@ class ThumbnailList(QListWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.doItemsLayout()
+        self.viewport().update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.doItemsLayout()
         self.viewport().update()
 
     def rebuild(self, select: list[int] | None = None):
@@ -115,7 +133,7 @@ class ThumbnailList(QListWidget):
             item = QListWidgetItem(str(i + 1))
             item.setData(self.ORIG_ROLE, i)
             item.setTextAlignment(Qt.AlignCenter)
-            item.setSizeHint(QSize(THUMB_W + 20, thumb_h + 28))
+            item.setSizeHint(QSize(0, thumb_h + 28))
             self.addItem(item)
         for r in select or []:
             if 0 <= r < self.count():
@@ -683,6 +701,7 @@ class DocTab(QWidget):
             if sizes and sizes[0] < 50:
                 total = sum(sizes) if sum(sizes) > 0 else 1140
                 self.splitter.setSizes([190, max(200, total - 190)])
+            self.thumbs.doItemsLayout()
 
     def _sync_side_tabs(self):
         has_bm = self.bookmarks.topLevelItemCount() > 0

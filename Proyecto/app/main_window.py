@@ -609,6 +609,9 @@ class MainWindow(QMainWindow):
         return True
 
     def _on_tab_changed(self, _index):
+        tab = self.current_tab()
+        if tab and tab.side.isVisible():
+            tab.thumbs.doItemsLayout()
         self._update_controls()
 
     def _sync_if_current(self, tab: DocTab):

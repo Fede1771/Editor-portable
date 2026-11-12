@@ -4,7 +4,7 @@
 [![Versión publicada](https://img.shields.io/badge/Versi%C3%B3n-2.1.4-blue)](https://github.com/Fede1771/Editor-portable/releases/latest)
 [![Procesamiento local](https://img.shields.io/badge/Procesamiento-Local-success)](#-privacidad-y-almacenamiento)
 [![Sin Administrador](https://img.shields.io/badge/Permisos-Sin%20Admin-brightgreen)](#-requisitos-del-usuario-final)
-[![Pruebas](https://img.shields.io/badge/Pruebas-250%20passed-success)](Proyecto/tests)
+[![Pruebas](https://img.shields.io/badge/Pruebas-251%20passed-success)](Proyecto/tests)
 
 > **Editor de PDF de escritorio para Windows, con procesamiento 100% local y distribución portable.**
 >
@@ -300,7 +300,7 @@ Las versiones corresponden al [entorno fijado en el lock](Proyecto/requirements/
 | **PyInstaller 6.22.3** | Empaqueta Python, módulos, DLL y recursos en una distribución `onedir` con ejecutable y carpeta `_internal/`. | Permite distribuir la aplicación a cualquier equipo Windows sin necesidad de tener Python instalado ni privilegios de administrador. |
 | **Tcl/Tk del splash de PyInstaller** | Presenta la imagen de inicio configurada en el archivo `.spec`, antes de que se muestre la ventana Qt. | Brinda respuesta visual inmediata durante la carga inicial del motor en equipos estándar. |
 | **PDF, HTML y CSS** | PDF es el formato de trabajo principal. MuPDF Story permite maquetar fragmentos HTML y CSS cuando se requiere renderizado tipográfico. | Estándares documentales universales para maquetación y lectura. |
-| **pytest 9.1.1** | Ejecuta 250 pruebas automatizadas de edición, guardado, seguridad, procesos, interfaz y blindaje geométrico; utiliza documentos sintéticos y preferencias aisladas. | Garantiza la integridad del código y previene regresiones en cada versión. |
+| **pytest 9.1.1** | Ejecuta 251 pruebas automatizadas de edición, guardado, seguridad, procesos, interfaz, centrado de miniaturas y blindaje geométrico; utiliza documentos sintéticos y preferencias aisladas. | Garantiza la integridad del código y previene regresiones en cada versión. |
 | **Git y GitHub Releases** | Versionan el código y distribuyen el ZIP portable y las notas de cada publicación. | Separan el control de versiones de código fuente de los binarios distribuidos. |
 | **Markdown y Mermaid** | Presentan la guía de uso, tablas técnicas y diagramas de arquitectura en el repositorio. | Documentación interactiva y legible directamente en la plataforma de alojamiento. |
 
