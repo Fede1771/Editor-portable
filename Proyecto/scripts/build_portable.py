@@ -30,7 +30,10 @@ def main() -> int:
     if not exe.is_file():
         print("No se encontró el ejecutable de salida.", file=sys.stderr)
         return 1
-    shutil.copy2(root.parent / "Abrir_EditorPortable.bat", bundle / "Abrir_EditorPortable.bat")
+    # El paquete distribuido sólo expone el .exe: el usuario final no necesita lanzadores .bat.
+    stale_bat = bundle / "Abrir_EditorPortable.bat"
+    if stale_bat.exists():
+        stale_bat.unlink()
     ico = root / "data/app_icon.ico"
     if ico.is_file():
         shutil.copy2(ico, bundle / "app_icon.ico")

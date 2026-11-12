@@ -4,13 +4,12 @@ La carpeta principal presenta dos carpetas y dos archivos de uso habitual:
 
 ```text
 Editor portable/
-├── Abrir_EditorPortable.bat       Doble clic para abrir el editor
+├── Abrir_EditorPortable.bat       Atajo de desarrollo: abre el portable compilado
 ├── README.md                     Información general
 ├── Programa/                     Programa listo para usar o entregar
 │   ├── EditorPDFPortable.zip
 │   └── EditorPDFPortable/
-│       ├── EditorPDFPortable.exe
-│       ├── Abrir_EditorPortable.bat
+│       ├── EditorPDFPortable.exe Ejecutable que abre el usuario final
 │       └── _internal/            Bibliotecas y recursos del portable
 └── Proyecto/                     Desarrollo y documentación
     ├── main.py                   Punto de entrada de Python
@@ -37,7 +36,7 @@ El entorno real está en `Proyecto/.venv/`. El enlace local `.venv` de la raíz 
 
 ## Usar y entregar el programa
 
-Hacé doble clic en `Abrir_EditorPortable.bat` desde la carpeta principal. Para entregar el programa usá `Programa/EditorPDFPortable.zip`.
+El usuario final abre `EditorPDFPortable.exe` dentro de la carpeta descomprimida; el ZIP distribuido no incluye archivos `.bat`. En el repositorio, `Abrir_EditorPortable.bat` queda como atajo de desarrollo para abrir el portable compilado. Para entregar el programa usá `Programa/EditorPDFPortable.zip`.
 
 Al utilizar la carpeta descomprimida, conservá completo su contenido, incluido `_internal/`.
 

@@ -200,6 +200,14 @@ def test_h37_h38_requirements_and_packaging_files():
     assert "%~dp0EditorPDFPortable.exe" in bat_txt
 
 
+def test_portable_bundle_excludes_bat_launchers():
+    """El paquete distribuido sólo expone el .exe: build_portable no debe copiar lanzadores .bat."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    build_txt = open(os.path.join(root, "scripts", "build_portable.py"), encoding="utf-8").read()
+    assert 'bundle / "Abrir_EditorPortable.bat")' not in build_txt
+    assert "stale_bat.unlink()" in build_txt
+
+
 def test_welcome_buttons(qapp, monkeypatch):
     """Verifica que la pantalla de bienvenida tiene 'Abrir archivo' y 'Crear PDF desde archivos', y no documento en blanco."""
     win = MainWindow()
